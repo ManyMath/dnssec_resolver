@@ -1,0 +1,365 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+
+import 'bindings.dart' as native;
+import 'dns.dart';
+import 'wire.dart';
+
+/// A validated answer with its DNSSEC status.
+class DnssecResult {
+  final String question;
+  final int recordType;
+  final String canonicalName;
+  final DnssecStatus status;
+  final List<DnssecRecord> records;
+  final List<DnssecRecord> aliases;
+
+  DnssecResult({
+    required this.question,
+    required this.recordType,
+    required this.canonicalName,
+    required this.status,
+    required List<DnssecRecord> records,
+    required List<DnssecRecord> aliases,
+  }) : records = List.unmodifiable(records),
+       aliases = List.unmodifiable(aliases);
+
+  List<DnssecTxtRecord> secureTxt() {
+    if (status != DnssecStatus.secure) {
+      throw DnssecValidationException(
+        'DNSSEC validation did not establish a secure answer',
+        status: status,
+      );
+    }
+    const malformed = DnssecMalformedResponseException(
+      'Invalid secure TXT result',
+    );
+    if (recordType != 16 ||
+        records.isEmpty ||
+        records.length > 64 ||
+        aliases.length > 7) {
+      throw malformed;
+    }
+
+    late final String normalizedQuestion;
+    late final String normalizedCanonical;
+    try {
+      normalizedQuestion = normalizeDnssecName(question);
+      normalizedCanonical = normalizeDnssecName(canonicalName);
+    } on DnssecException {
+      throw malformed;
+    }
+    if (question != normalizedQuestion ||
+        canonicalName != normalizedCanonical) {
+      throw malformed;
+    }
+
+    var owner = normalizedQuestion;
+    final seen = <String>{owner};
+    for (final alias in aliases) {
+      late final String aliasName;
+      late final String target;
+      try {
+        aliasName = normalizeDnssecName(alias.name);
+        target = normalizeDnssecName(alias.data);
+      } on DnssecException {
+        throw malformed;
+      }
+      if (alias.type != 5 ||
+          alias.ttl < 0 ||
+          alias.ttl > 0xffffffff ||
+          alias.name != aliasName ||
+          aliasName != owner ||
+          !seen.add(target)) {
+        throw malformed;
+      }
+      owner = target;
+    }
+    if (owner != normalizedCanonical) throw malformed;
+
+    final txt = <DnssecTxtRecord>[];
+    for (final record in records) {
+      final bytes = record.txt;
+      late final String recordName;
+      try {
+        recordName = normalizeDnssecName(record.name);
+      } on DnssecException {
+        throw malformed;
+      }
+      if (bytes == null ||
+          record.type != 16 ||
+          record.ttl < 0 ||
+          record.ttl > 0xffffffff ||
+          record.name != recordName ||
+          recordName != normalizedCanonical) {
+        throw malformed;
+      }
+      txt.add(DnssecTxtRecord(name: recordName, ttl: record.ttl, bytes: bytes));
+    }
+    return List.unmodifiable(txt);
+  }
+}
+
+const _maxMessageBytes = 65535;
+
+/// Validates DNS answers on device over a [DnssecWireTransport].
+class DnssecResolver {
+  final DnssecWireTransport transport;
+  final Duration timeout;
+  final int maxQueries;
+  final String? trustAnchors;
+
+  DnssecResolver({
+    required this.transport,
+    this.timeout = const Duration(seconds: 20),
+    this.maxQueries = 64,
+    this.trustAnchors,
+  }) {
+    if (timeout.inMilliseconds < 1 ||
+        timeout > const Duration(minutes: 2) ||
+        maxQueries < 1 ||
+        maxQueries > 128 ||
+        (trustAnchors != null &&
+            (trustAnchors!.trim().isEmpty ||
+                utf8.encode(trustAnchors!).length > 60000))) {
+      throw ArgumentError('Invalid DNSSEC resolver configuration');
+    }
+  }
+
+  Future<DnssecResult> lookup(String domain, {int recordType = 16}) async =>
+      startLookup(domain, recordType: recordType).result;
+
+  Future<List<DnssecTxtRecord>> lookupTxt(String domain) async =>
+      startTxtLookup(domain).result;
+
+  DnssecOperation<List<DnssecTxtRecord>> startTxtLookup(String domain) {
+    final operation = startLookup(domain);
+    return DnssecOperation(
+      operation.result.then((result) => result.secureTxt()),
+      operation.cancel,
+    );
+  }
+
+  /// Starts a lookup. Invalid names and an unavailable validator fail the
+  /// returned operation; an unsupported [recordType] throws [ArgumentError].
+  DnssecOperation<DnssecResult> startLookup(
+    String domain, {
+    int recordType = 16,
+  }) {
+    // A, CNAME, TXT, AAAA.
+    if (!const {1, 5, 16, 28}.contains(recordType)) {
+      throw ArgumentError.value(recordType, 'recordType');
+    }
+    final String question;
+    final int handle;
+    try {
+      question = normalizeDnssecName(domain);
+      handle = _startValidator(question, recordType);
+    } on DnssecException catch (error) {
+      return DnssecOperation.failed(error);
+    }
+    final result = Completer<DnssecResult>();
+    final pending = <int, DnssecOperation<DnssecWireResponse>>{};
+    Timer? pollTimer;
+    Timer? deadline;
+    var done = false;
+
+    void cancelTransport(DnssecOperation<DnssecWireResponse>? exchange) {
+      try {
+        exchange?.cancel();
+      } catch (_) {}
+    }
+
+    void close() {
+      if (done) return;
+      done = true;
+      pollTimer?.cancel();
+      deadline?.cancel();
+      native.release(handle);
+      for (final exchange in pending.values.toList()) {
+        cancelTransport(exchange);
+      }
+      pending.clear();
+    }
+
+    void fail(Object error, [StackTrace? stack]) {
+      if (done) return;
+      close();
+      result.completeError(error, stack);
+    }
+
+    Future<void> exchange(int id, Uint8List bytes) async {
+      try {
+        if (done) return;
+        final query = List<int>.unmodifiable(bytes);
+        final operation = transport.startWire(
+          query,
+          maxResponseBytes: _maxMessageBytes,
+        );
+        pending[id] = operation;
+        final response = await operation.result;
+        if (done) return;
+        // Re-checked here so a custom transport cannot bypass the bound.
+        if (response.message.length > _maxMessageBytes) {
+          throw const DnssecResponseTooLargeException(
+            'DNS message exceeds limit',
+          );
+        }
+        // Match the exact native query before applying Age. This package owns
+        // both checks and does not trust a port implementation to do either.
+        final message = validateAndAgeDnssecWireResponse(
+          query,
+          response.message,
+          age: response.age,
+        );
+        final pointer = calloc<Uint8>(message.length + 1);
+        try {
+          pointer.asTypedList(message.length).setAll(0, message);
+          native.answer(handle, id, pointer, message.length);
+        } finally {
+          calloc.free(pointer);
+        }
+      } catch (error, stack) {
+        fail(_mapPortFailure(error, stack), stack);
+      } finally {
+        cancelTransport(pending.remove(id));
+      }
+    }
+
+    void poll() {
+      try {
+        for (var i = 0; i < 16 && !done; i++) {
+          final pointer = native.poll(handle);
+          if (pointer == nullptr) break;
+          late final Map<String, dynamic> event;
+          try {
+            event =
+                jsonDecode(pointer.cast<Utf8>().toDartString())
+                    as Map<String, dynamic>;
+          } finally {
+            native.free(pointer);
+          }
+          if (event.containsKey('query')) {
+            unawaited(
+              exchange(
+                event['id'] as int,
+                base64Decode(event['query'] as String),
+              ),
+            );
+            continue;
+          }
+          if (event.containsKey('error')) {
+            final name = event['error'];
+            throw _nativeFailure(name, timeout);
+          }
+          final value = event['result'] as Map<String, dynamic>;
+          final statusName = value['status'];
+          final status = DnssecStatus.values
+              .where((item) => item.name == statusName)
+              .firstOrNull;
+          if (status == null) {
+            throw _nativeFailure(statusName, timeout);
+          }
+          DnssecRecord record(dynamic raw) => DnssecRecord(
+            name: normalizeDnssecName(raw['name'] as String),
+            type: raw['record_type'] as int,
+            ttl: raw['ttl'] as int,
+            data: raw['data'] as String,
+            txt: (raw['txt'] as List?)?.cast<int>(),
+          );
+          final outcome = DnssecResult(
+            question: question,
+            recordType: recordType,
+            canonicalName: normalizeDnssecName(
+              value['canonical_name'] as String,
+            ),
+            status: status,
+            records: (value['records'] as List).map(record).toList(),
+            aliases: (value['aliases'] as List).map(record).toList(),
+          );
+          close();
+          result.complete(outcome);
+        }
+      } catch (error, stack) {
+        fail(
+          error is DnssecException
+              ? error
+              : DnssecMalformedResponseException(
+                  'Invalid native DNS result',
+                  cause: error,
+                  causeStackTrace: stack,
+                ),
+          stack,
+        );
+      }
+    }
+
+    pollTimer = Timer.periodic(const Duration(milliseconds: 5), (_) => poll());
+    deadline = Timer(
+      timeout,
+      () => fail(
+        DnssecTimeoutException('DNSSEC lookup timed out', timeout: timeout),
+      ),
+    );
+    return DnssecOperation(
+      result.future,
+      () => fail(const DnssecCancelledException('DNSSEC lookup cancelled')),
+    );
+  }
+
+  int _startValidator(String name, int recordType) {
+    final config = utf8.encode(
+      jsonEncode({
+        'name': '$name.',
+        'record_type': recordType,
+        // The Dart deadline must fire first so a timeout is never reported as
+        // an unavailable validator.
+        'timeout_ms': timeout.inMilliseconds + 1000,
+        'max_queries': maxQueries,
+        'trust_anchors': trustAnchors,
+      }),
+    );
+    final pointer = calloc<Uint8>(config.length);
+    final int handle;
+    try {
+      pointer.asTypedList(config.length).setAll(0, config);
+      handle = native.start(pointer, config.length);
+    } finally {
+      calloc.free(pointer);
+    }
+    if (handle == 0) {
+      throw const DnssecUnavailableException(
+        'DNSSEC validator unavailable or busy',
+      );
+    }
+    return handle;
+  }
+}
+
+DnssecException _mapPortFailure(Object error, StackTrace stack) {
+  if (error is DnssecException) return error;
+  return DnssecTransportException(
+    'DNS transport failed',
+    cause: error,
+    causeStackTrace: stack,
+  );
+}
+
+DnssecException _nativeFailure(Object? name, Duration timeout) {
+  final message = 'DNSSEC validator failed: $name';
+  return switch (name) {
+    'aliasAmbiguous' => DnssecAliasAmbiguousException(message),
+    'aliasTooLong' => DnssecAliasTooLongException(message),
+    'aliasLoop' => DnssecAliasLoopException(message),
+    'noRecords' => DnssecNoRecordException(message),
+    'responseTooLarge' => DnssecResponseTooLargeException(message),
+    'queryFailed' => DnssecQueryFailedException(message),
+    'cancelled' => DnssecCancelledException(message),
+    'timedOut' => DnssecTimeoutException(message, timeout: timeout),
+    _ => DnssecUnavailableException(message),
+  };
+}
