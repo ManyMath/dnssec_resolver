@@ -1,0 +1,11 @@
+.git/
+.dart_tool/
+.github/
+build/
+native/target/
+pubspec.lock
+pubspec_overrides.yaml
+test/
+tool/
+*.log
+__pycache__/

@@ -1,0 +1,7 @@
+.dart_tool/
+build/
+native/target/
+pubspec.lock
+pubspec_overrides.yaml
+*.log
+__pycache__/
