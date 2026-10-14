@@ -24,6 +24,7 @@ static JOBS: LazyLock<Mutex<HashMap<u64, Job>>> = LazyLock::new(|| Mutex::new(Ha
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static NEXT_JOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 const MAX_JOBS: usize = 8;
+const ABI_VERSION: u32 = 1;
 
 fn jobs() -> MutexGuard<'static, HashMap<u64, Job>> {
     JOBS.lock().unwrap_or_else(PoisonError::into_inner)
@@ -155,6 +156,11 @@ fn start(config: &[u8]) -> Option<u64> {
         },
     );
     Some(handle)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dnssec_abi_version() -> u32 {
+    ABI_VERSION
 }
 
 #[unsafe(no_mangle)]
@@ -333,6 +339,11 @@ mod tests {
 
     fn status(event: &Value) -> &str {
         event["result"]["status"].as_str().unwrap()
+    }
+
+    #[test]
+    fn abi_version_is_stable() {
+        assert_eq!(dnssec_abi_version(), 1);
     }
 
     #[test]

@@ -154,6 +154,29 @@ class DnssecResult {
   }
 }
 
+const _abiVersion = 1;
+bool _abiChecked = false;
+
+void _checkAbi() {
+  if (_abiChecked) return;
+  int version;
+  try {
+    version = native.abiVersion();
+  } catch (_) {
+    throw const DnssecException(
+      DnssecError.unavailable,
+      'DNSSEC validator library unavailable',
+    );
+  }
+  if (version != _abiVersion) {
+    throw DnssecException(
+      DnssecError.unavailable,
+      'DNSSEC validator ABI $version is not supported',
+    );
+  }
+  _abiChecked = true;
+}
+
 class DnssecResolver {
   static final Object validator = Object();
 
@@ -209,6 +232,7 @@ class DnssecResolver {
     if (!const {1, 5, 16, 28}.contains(recordType)) {
       throw ArgumentError.value(recordType, 'recordType');
     }
+    _checkAbi();
     final config = utf8.encode(
       jsonEncode({
         'name': '$domain.',

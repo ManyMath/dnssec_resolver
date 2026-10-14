@@ -4,3 +4,4 @@
 - Answers are scoped to the queried owner; additional-section data is ignored and expanded records are rejected.
 - Aliases ending in an authenticated NODATA answer report `noRecords`.
 - Lookups are limited to A, CNAME, TXT and AAAA.
+- The native ABI version is checked on the first lookup.
