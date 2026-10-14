@@ -33,7 +33,8 @@ try {
 Every answer is validated locally from the trust anchors down to the queried
 owner. The DoH endpoint is only a transport: it can withhold or delay answers
 but cannot forge a secure one. Answers are scoped to the queried owner;
-additional-section data is ignored and expanded records are rejected. The endpoint sees every query the
+additional-section data is ignored and expanded records are rejected. RRSIGs
+using SHA-1 based algorithms are ignored. The endpoint sees every query the
 validator makes, from the root keys down, and, without a proxy, your address.
 `DnssecResolver.validator` identifies this package to consumers that check a
 `TxtAnswer.validator`, such as `openalias`.

@@ -76,6 +76,60 @@ async fn transport_scopes_answers_to_the_queried_owner() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[allow(deprecated)]
+async fn transport_drops_sha1_signatures() {
+    use hickory_net::proto::{
+        dnssec::rdata::{DNSSECRData, RRSIG, SigInput},
+        rr::SerialNumber,
+    };
+    let (transport, mut receiver) = transport();
+    let name = "alice.example.test.";
+    let signature = |algorithm| {
+        let input = SigInput {
+            type_covered: RecordType::TXT,
+            algorithm,
+            num_labels: 3,
+            original_ttl: 300,
+            sig_expiration: SerialNumber::new(2),
+            sig_inception: SerialNumber::new(1),
+            key_tag: 1,
+            signer_name: Name::from_ascii("example.test.").unwrap(),
+        };
+        Record::from_rdata(
+            Name::from_ascii(name).unwrap(),
+            300,
+            RData::DNSSEC(DNSSECRData::RRSIG(RRSIG::from_sig(input, vec![0; 8]))),
+        )
+    };
+    let message = support::response(
+        name,
+        RecordType::TXT,
+        vec![
+            txt(name),
+            signature(Algorithm::RSASHA1),
+            signature(Algorithm::RSASHA1NSEC3SHA1),
+            signature(Algorithm::ED25519),
+        ],
+        vec![signature(Algorithm::RSASHA1)],
+        ResponseCode::NoError,
+    );
+    let mut stream = transport.send(request(1, name, RecordType::TXT));
+    let (response, _) = tokio::join!(stream.next(), serve(&mut receiver, message));
+    let response = response.unwrap().unwrap();
+    let algorithms: Vec<_> = response
+        .answers
+        .iter()
+        .filter_map(|r| match &r.data {
+            RData::DNSSEC(DNSSECRData::RRSIG(sig)) => Some(sig.input().algorithm),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(algorithms, [Algorithm::ED25519]);
+    assert_eq!(response.answers.len(), 2);
+    assert!(response.authorities.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn transport_coalesces_identical_questions() {
     let (transport, mut receiver) = transport();
     let message = support::response(

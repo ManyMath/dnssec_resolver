@@ -179,6 +179,15 @@ impl Transport {
         // Answers are scoped to the queried owner; aliases are followed by the engine.
         response.answers.retain(|r| r.name == question.name);
         response.additionals.clear();
+        // SHA-1 based signatures are not accepted.
+        let sha1 = |r: &hickory_net::proto::rr::Record| match &r.data {
+            RData::DNSSEC(DNSSECRData::RRSIG(sig)) => {
+                matches!(u8::from(sig.input().algorithm), 5 | 7)
+            }
+            _ => false,
+        };
+        response.answers.retain(|r| !sha1(r));
+        response.authorities.retain(|r| !sha1(r));
         if question.query_type != RecordType::CNAME
             && response
                 .answers
