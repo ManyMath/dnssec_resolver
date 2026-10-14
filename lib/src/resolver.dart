@@ -104,7 +104,29 @@ class DnssecResult {
   }
 }
 
+const _abiVersion = 1;
 const _maxMessageBytes = 65535;
+bool _abiChecked = false;
+
+void _checkAbi() {
+  if (_abiChecked) return;
+  int version;
+  try {
+    version = native.abiVersion();
+  } catch (error, stack) {
+    throw DnssecUnavailableException(
+      'DNSSEC validator library unavailable',
+      cause: error,
+      causeStackTrace: stack,
+    );
+  }
+  if (version != _abiVersion) {
+    throw DnssecUnavailableException(
+      'DNSSEC validator ABI $version is not supported',
+    );
+  }
+  _abiChecked = true;
+}
 
 /// Validates DNS answers on device over a [DnssecWireTransport].
 class DnssecResolver {
@@ -312,6 +334,7 @@ class DnssecResolver {
   }
 
   int _startValidator(String name, int recordType) {
+    _checkAbi();
     final config = utf8.encode(
       jsonEncode({
         'name': '$name.',

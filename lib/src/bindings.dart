@@ -1,5 +1,8 @@
 import 'dart:ffi';
 
+@Native<Uint32 Function()>(symbol: 'dnssec_abi_version')
+external int abiVersion();
+
 @Native<Uint64 Function(Pointer<Uint8>, Size)>(symbol: 'dnssec_start')
 external int start(Pointer<Uint8> config, int length);
 

@@ -4,4 +4,5 @@
 - Answers are scoped to the queried owner; additional-section data is ignored and expanded records are rejected.
 - Aliases ending in an authenticated NODATA answer fail with `DnssecNoRecordException`.
 - Lookups are limited to A, CNAME, TXT and AAAA.
+- The native ABI version is checked on the first lookup.
 - Failures are a sealed `DnssecException` hierarchy and are reported through the lookup operation.
