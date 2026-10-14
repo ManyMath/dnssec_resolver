@@ -5,13 +5,17 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
 
-use futures_util::{Stream, StreamExt, stream};
+use futures_util::{
+    FutureExt, Stream, StreamExt,
+    future::{BoxFuture, Shared},
+    stream,
+};
 use hickory_net::{
     DnsError, NetError,
     dnssec::DnssecDnsHandle,
@@ -62,11 +66,14 @@ impl RuntimeProvider for NoNetworkRuntime {
     }
 }
 
+type Pending = Shared<BoxFuture<'static, Result<DnsResponse, String>>>;
+
 #[derive(Clone)]
 pub struct Transport {
     pub requests: mpsc::Sender<Exchange>,
     pub count: Arc<AtomicUsize>,
     pub max_queries: usize,
+    pub pending: Arc<Mutex<HashMap<Query, Pending>>>,
 }
 
 impl DnsHandle for Transport {
@@ -74,15 +81,40 @@ impl DnsHandle for Transport {
     type Runtime = NoNetworkRuntime;
 
     fn send(&self, request: DnsRequest) -> Self::Response {
-        Box::pin(stream::once(self.clone().exchange(request)))
+        let transport = self.clone();
+        Box::pin(stream::once(async move {
+            let Some(question) = request.queries.first().cloned() else {
+                return Err(NetError::from("request has no question"));
+            };
+            // Every question is charged, shared or not, so the budget bounds all work.
+            if transport.count.fetch_add(1, Ordering::Relaxed) >= transport.max_queries {
+                return Err(NetError::from("query limit exceeded"));
+            }
+            let id = request.id;
+            // Identical questions within one lookup share a single exchange.
+            let exchange = transport
+                .pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(question)
+                .or_insert_with(|| {
+                    transport
+                        .clone()
+                        .exchange(request)
+                        .map(|r| r.map_err(|e| e.to_string()))
+                        .boxed()
+                        .shared()
+                })
+                .clone();
+            let mut response = exchange.await.map_err(NetError::from)?;
+            response.metadata.id = id;
+            Ok(response)
+        }))
     }
 }
 
 impl Transport {
     async fn exchange(self, mut request: DnsRequest) -> Result<DnsResponse, NetError> {
-        if self.count.fetch_add(1, Ordering::Relaxed) >= self.max_queries {
-            return Err(NetError::from("query limit exceeded"));
-        }
         let Some(question) = request.queries.first().cloned() else {
             return Err(NetError::from("request has no question"));
         };

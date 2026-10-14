@@ -1,13 +1,139 @@
-use crate::engine::NoNetworkRuntime;
+use crate::engine::{Exchange, NoNetworkRuntime, Transport};
 #[path = "../tests/support/mod.rs"]
 pub(crate) mod support;
+use futures_util::StreamExt;
 use hickory_net::{
     proto::{
         dnssec::{Algorithm, DigestType, PublicKeyBuf, TrustAnchors, rdata::DNSKEY},
-        rr::Name,
+        op::{DnsRequest, DnsRequestOptions, Message, Query, ResponseCode},
+        rr::{Name, RData, Record, RecordType, rdata::TXT},
     },
     runtime::RuntimeProvider,
+    xfer::DnsHandle,
 };
+use std::sync::{Arc, atomic::AtomicUsize};
+use tokio::sync::mpsc;
+
+fn transport() -> (Transport, mpsc::Receiver<Exchange>) {
+    let (requests, receiver) = mpsc::channel(16);
+    let transport = Transport {
+        requests,
+        count: Arc::new(AtomicUsize::new(0)),
+        max_queries: 8,
+        pending: Arc::default(),
+    };
+    (transport, receiver)
+}
+
+fn request(id: u16, name: &str, kind: RecordType) -> DnsRequest {
+    let mut message = Message::query();
+    message.metadata.id = id;
+    message.add_query(Query::query(Name::from_ascii(name).unwrap(), kind));
+    DnsRequest::new(message, DnsRequestOptions::default())
+}
+
+fn txt(name: &str) -> Record {
+    Record::from_rdata(
+        Name::from_ascii(name).unwrap(),
+        300,
+        RData::TXT(TXT::new(vec![name.to_string()])),
+    )
+}
+
+async fn serve(receiver: &mut mpsc::Receiver<Exchange>, mut message: Message) -> Message {
+    let Exchange { wire, reply } = receiver.recv().await.unwrap();
+    let query = Message::from_vec(&wire).unwrap();
+    message.metadata.id = query.metadata.id;
+    reply.send(Ok(message.to_vec().unwrap())).unwrap();
+    query
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn transport_scopes_answers_to_the_queried_owner() {
+    let (transport, mut receiver) = transport();
+    let mut message = support::response(
+        "alice.example.test.",
+        RecordType::TXT,
+        vec![
+            txt("alice.example.test."),
+            txt("bob.example.test."),
+            txt("ALICE.example.test."),
+        ],
+        vec![],
+        ResponseCode::NoError,
+    );
+    message.insert_additionals(vec![txt("carol.example.test.")]);
+    let mut stream = transport.send(request(1, "alice.example.test.", RecordType::TXT));
+    let (response, _) = tokio::join!(stream.next(), serve(&mut receiver, message));
+    let response = response.unwrap().unwrap();
+    assert_eq!(response.answers.len(), 2);
+    assert!(response.answers.iter().all(|r| {
+        r.name
+            .to_ascii()
+            .eq_ignore_ascii_case("alice.example.test.")
+    }));
+    assert!(response.additionals.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn transport_coalesces_identical_questions() {
+    let (transport, mut receiver) = transport();
+    let message = support::response(
+        "alice.example.test.",
+        RecordType::TXT,
+        vec![txt("alice.example.test.")],
+        vec![],
+        ResponseCode::NoError,
+    );
+    let mut first = transport.send(request(1, "alice.example.test.", RecordType::TXT));
+    let mut second = transport.send(request(2, "ALICE.example.test.", RecordType::TXT));
+    let (first, second, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(first.next(), second.next(), serve(&mut receiver, message))
+    })
+    .await
+    .unwrap();
+    assert_eq!(first.unwrap().unwrap().id, 1);
+    assert_eq!(second.unwrap().unwrap().id, 2);
+    assert_eq!(
+        transport.count.load(std::sync::atomic::Ordering::Relaxed),
+        2
+    );
+    assert!(receiver.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn shared_questions_count_against_the_query_budget() {
+    let (mut transport, mut receiver) = transport();
+    transport.max_queries = 2;
+    let message = support::response(
+        "alice.example.test.",
+        RecordType::TXT,
+        vec![txt("alice.example.test.")],
+        vec![],
+        ResponseCode::NoError,
+    );
+    let mut first = transport.send(request(1, "alice.example.test.", RecordType::TXT));
+    let mut second = transport.send(request(2, "alice.example.test.", RecordType::TXT));
+    let (first, second, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(first.next(), second.next(), serve(&mut receiver, message))
+    })
+    .await
+    .unwrap();
+    assert!(first.unwrap().is_ok());
+    assert!(second.unwrap().is_ok());
+    let third = transport
+        .send(request(3, "alice.example.test.", RecordType::TXT))
+        .next()
+        .await
+        .unwrap();
+    assert!(
+        third
+            .unwrap_err()
+            .to_string()
+            .contains("query limit exceeded")
+    );
+    assert!(receiver.try_recv().is_err());
+}
 
 #[test]
 fn root_anchors_match_iana_2017_and_2024_ds_digests() {

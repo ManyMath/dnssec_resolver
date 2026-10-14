@@ -123,6 +123,7 @@ fn start(config: &[u8]) -> Option<u64> {
         requests: requests_tx,
         count: Arc::new(AtomicUsize::new(0)),
         max_queries: config.max_queries,
+        pending: Arc::default(),
     };
     let thread = std::thread::Builder::new().name("dnssec-validator".into()).spawn(move || {
         let _active = ActiveGuard;
