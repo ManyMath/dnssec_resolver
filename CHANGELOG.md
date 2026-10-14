@@ -6,4 +6,5 @@
 - Lookups are limited to A, CNAME, TXT and AAAA.
 - The native ABI version is checked on the first lookup.
 - Identical in-flight questions within one lookup share one exchange.
+- RRSIGs using SHA-1 based algorithms are ignored.
 - Failures are a sealed `DnssecException` hierarchy and are reported through the lookup operation.

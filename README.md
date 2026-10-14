@@ -40,12 +40,13 @@ but cannot forge a secure one. Because the caller supplies the transport, each
 wire response is matched against its query and bounded again here, so callers
 need not repeat those checks; nothing a sibling package or private seam already
 guarantees is checked twice. Answers are scoped to the queried owner;
-additional-section data is ignored and expanded records are rejected. The
-upstream resolver sees every query the validator makes, from the root keys
-down, and, without a proxy, your address. Consumers must use `lookupTxt` or
-call `secureTxt()` before accepting TXT data. `secureTxt()` throws
-`DnssecValidationException` for insecure, bogus or indeterminate results and
-`DnssecMalformedResponseException` for malformed ones.
+additional-section data is ignored and expanded records are rejected. RRSIGs
+using SHA-1 based algorithms are ignored. The upstream resolver sees every
+query the validator makes, from the root keys down, and, without a proxy, your
+address. Consumers must use `lookupTxt` or call `secureTxt()` before accepting
+TXT data. `secureTxt()` throws `DnssecValidationException` for insecure, bogus
+or indeterminate results and `DnssecMalformedResponseException` for malformed
+ones.
 
 ## Configuration
 
