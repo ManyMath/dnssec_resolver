@@ -20,23 +20,11 @@ jobs:
       - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d
         with:
           sdk: ${{ matrix.sdk }}
-      # doh_transport is not on pub.dev yet; resolve it from a sibling clone
-      # the same way the README describes for development.
-      - run: |
-          git clone --filter=blob:none --no-checkout https://github.com/cypherstack/doh_transport.git doh_transport
-          git -C doh_transport checkout --detach b00296109b2cb260798e944e2f0a928dc284cf4b
-          test "$(git -C doh_transport rev-parse HEAD)" = "b00296109b2cb260798e944e2f0a928dc284cf4b"
-        shell: bash
       - shell: bash
         run: rustup toolchain install 1.90.0 --profile minimal --component clippy --component rustfmt
       - shell: bash
         working-directory: dnssec_resolver
         run: |
-          cat > pubspec_overrides.yaml <<'YAML'
-          dependency_overrides:
-            doh_transport:
-              path: ../doh_transport
-          YAML
           dart pub get
           dart format --output=none --set-exit-if-changed lib test hook tool example
           dart analyze --fatal-infos

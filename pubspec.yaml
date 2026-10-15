@@ -5,7 +5,6 @@ repository: https://github.com/cypherstack/dnssec_resolver
 environment:
   sdk: ">=3.10.0 <4.0.0"
 dependencies:
-  doh_transport: ^0.0.1
   ffi: ^2.1.4
   hooks: ^2.1.0
   native_toolchain_rust: ^1.0.6

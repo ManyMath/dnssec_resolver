@@ -1,5 +1,4 @@
 library;
 
-export 'package:doh_transport/doh_transport.dart'
-    show DnsRecord, DnsTxtRecord, DohWireTransport;
+export 'src/dns.dart';
 export 'src/resolver.dart';

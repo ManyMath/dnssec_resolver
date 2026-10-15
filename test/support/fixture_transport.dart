@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:doh_transport/doh_transport.dart';
+import 'package:dnssec_resolver/dnssec_resolver.dart';
 
 class Fixtures {
   final Map<String, dynamic> _json =
@@ -58,7 +58,7 @@ class Fixtures {
   }
 }
 
-class FixtureTransport implements DohWireTransport {
+class FixtureTransport implements DnssecWireTransport {
   final Fixtures fixtures;
   final List<List<int>> queries = [];
   final List<int> Function(List<int> query, List<int> reply)? mutate;
@@ -67,17 +67,16 @@ class FixtureTransport implements DohWireTransport {
   FixtureTransport(this.fixtures, {this.mutate, this.statusCode = 200});
 
   @override
-  DnsOperation<DohHttpResponse> startWire(
+  DnssecOperation<DnssecWireResponse> startWire(
     Uri endpoint,
     List<int> query, {
     required int maxResponseBytes,
-    bool preserveMessage = false,
   }) {
     queries.add(query);
     final reply = fixtures.reply(query);
-    return DnsOperation(
+    return DnssecOperation(
       Future.value(
-        DohHttpResponse(
+        DnssecWireResponse(
           statusCode,
           mutate == null ? reply : mutate!(query, reply),
         ),

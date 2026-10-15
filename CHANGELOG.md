@@ -1,6 +1,6 @@
 ## 0.0.1
 
-- Local DNSSEC validation over `doh_transport` with cancellation, bounded queries, secure-only TXT access, validated CNAME chains and Age-adjusted TTLs.
+- Local DNSSEC validation over a caller-owned, cancellable wire port with bounded queries, secure-only TXT access, validated CNAME chains and exactly-once Age-adjusted TTLs.
 - Answers are scoped to the queried owner; additional-section data is ignored and expanded records are rejected.
 - Aliases ending in an authenticated NODATA answer report `noRecords`.
 - Lookups are limited to A, CNAME, TXT and AAAA.

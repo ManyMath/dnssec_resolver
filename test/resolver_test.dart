@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:doh_transport/doh_transport.dart';
 import 'package:dnssec_resolver/dnssec_resolver.dart';
 import 'package:test/test.dart';
 
@@ -238,7 +237,7 @@ void main() {
     await expectLater(
       resolver.lookupTxt('alice.example.test'),
       throwsA(
-        isA<DnsTransportException>().having(
+        isA<DnssecTransportException>().having(
           (error) => error.httpStatus,
           'httpStatus',
           500,
@@ -255,7 +254,7 @@ void main() {
     );
     await expectLater(
       resolver.lookupTxt('alice.example.test'),
-      throwsA(isA<DnsResponseTooLargeException>()),
+      throwsA(isA<DnssecResponseTooLargeException>()),
     );
   });
 
@@ -280,7 +279,7 @@ void main() {
       records: result.records,
       aliases: [
         ...result.aliases,
-        const DnsRecord(
+        const DnssecRecord(
           name: 'alias.example.test',
           type: 5,
           ttl: 1,
@@ -414,7 +413,7 @@ void main() {
         // An unparseable body fails TTL adjustment before the engine sees it.
         throwsA(
           mutation == 'short'
-              ? isA<DnsMalformedResponseException>()
+              ? isA<DnssecMalformedResponseException>()
               : isA<DnssecException>(),
         ),
       );
@@ -483,26 +482,75 @@ void main() {
       expect(valid.single.text, contains('valid'));
     },
   );
+
+  test('exception leaves expose structured fields and readable types', () {
+    final validation = DnssecValidationException(DnssecStatus.bogus);
+    expect(validation, isA<DnssecValidationException>());
+    expect(validation.code, DnssecError.bogus);
+    expect(validation.status, DnssecStatus.bogus);
+    expect(validation.toString(), contains('DnssecValidationException'));
+    expect(validation.toString(), contains('bogus'));
+
+    final cause = StateError('socket');
+    final stack = StackTrace.current;
+    final transport = DnssecTransportException(
+      'HTTP failed',
+      httpStatus: 503,
+      cause: cause,
+      causeStackTrace: stack,
+    );
+    expect(transport, isA<DnssecTransportException>());
+    expect(transport.code, DnssecError.transport);
+    expect(transport.httpStatus, 503);
+    expect(transport.cause, same(cause));
+    expect(transport.causeStackTrace, same(stack));
+    expect(transport.toString(), contains('DnssecTransportException'));
+    expect(transport.toString(), contains('httpStatus: 503'));
+
+    const timeout = DnssecTimeoutException(
+      'deadline',
+      timeout: Duration(seconds: 20),
+    );
+    expect(timeout.code, DnssecError.timedOut);
+    expect(timeout.timeout, const Duration(seconds: 20));
+    expect(timeout.toString(), contains('deadline'));
+    expect(timeout.toString(), contains('timeout: 0:00:20.000000'));
+  });
+
+  test(
+    'dropped ordinary and failed operations are immediately handled',
+    () async {
+      final uncaught = <Object>[];
+      await runZonedGuarded(() async {
+        DnssecOperation<void>(
+          Future<void>.error(
+            const DnssecTransportException('ordinary dropped'),
+          ),
+          () {},
+        );
+        DnssecOperation<void>.failed(const DnssecCancelledException('dropped'));
+        await Future<void>.delayed(Duration.zero);
+      }, (error, _) => uncaught.add(error));
+      expect(uncaught, isEmpty);
+    },
+  );
 }
 
-class StalledTransport implements DohWireTransport {
+class StalledTransport implements DnssecWireTransport {
   final started = Completer<void>();
   bool cancelled = false;
   @override
-  DnsOperation<DohHttpResponse> startWire(
+  DnssecOperation<DnssecWireResponse> startWire(
     Uri endpoint,
     List<int> query, {
     required int maxResponseBytes,
-    bool preserveMessage = false,
   }) {
     if (!started.isCompleted) started.complete();
-    final result = Completer<DohHttpResponse>();
-    return DnsOperation(result.future, () {
+    final result = Completer<DnssecWireResponse>();
+    return DnssecOperation(result.future, () {
       cancelled = true;
       if (!result.isCompleted) {
-        result.completeError(
-          const DnssecException(DnssecError.cancelled, 'cancelled'),
-        );
+        result.completeError(const DnssecCancelledException('cancelled'));
       }
     });
   }

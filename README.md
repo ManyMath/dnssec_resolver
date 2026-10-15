@@ -1,6 +1,6 @@
 # dnssec_resolver
 
-On-device DNSSEC validation over a caller-supplied `DohWireTransport`. The
+On-device DNSSEC validation over a caller-supplied `DnssecWireTransport`. The
 validator is a native Rust crate built by the package's build hook; the Dart
 side performs no networking of its own.
 
@@ -8,9 +8,7 @@ side performs no networking of its own.
 
 ```dart
 import 'package:dnssec_resolver/dnssec_resolver.dart';
-import 'package:doh_transport/doh_transport_io.dart';
-
-final transport = IoDohTransport();
+final transport = MyDnssecWireTransport();
 try {
   final resolver = DnssecResolver(transport: transport);
   for (final record in await resolver.lookupTxt('example.com')) {
@@ -48,7 +46,8 @@ validator makes, from the root keys down, and, without a proxy, your address.
 - `trustAnchors`: DNSKEY records in zone presentation format; the IANA root
   keys by default.
 - Proxy, fixed destination, connection reuse and transport deadlines belong to
-  the transport; see `doh_transport`.
+  the caller-supplied transport. The `cs_openalias` facade provides the
+  production adapter for `doh_transport`.
 
 ## Building
 
@@ -57,15 +56,6 @@ rustup with the toolchain in `native/rust-toolchain.toml` and the Rust target
 for each platform you build for. Dart SDK 3.10 or later.
 
 ## Development
-
-`doh_transport` is not on pub.dev yet: clone it beside this repository and add
-`pubspec_overrides.yaml`:
-
-```yaml
-dependency_overrides:
-  doh_transport:
-    path: ../doh_transport
-```
 
 `bash tool/check.sh` runs format, analyze, the cargo checks and the tests.
 `tool/notices.py` regenerates `NOTICES` from the crate licenses.
