@@ -300,6 +300,37 @@ void main() {
     );
   });
 
+  test('secure TXT accessor rejects every non-secure status', () async {
+    final secure = await resolver.lookup('alice.example.test');
+    final txtRecords = secure.secureTxt();
+    for (final status in [
+      DnssecStatus.insecure,
+      DnssecStatus.bogus,
+      DnssecStatus.indeterminate,
+    ]) {
+      final result = DnssecResult(
+        question: secure.question,
+        recordType: secure.recordType,
+        canonicalName: secure.canonicalName,
+        resolver: secure.resolver,
+        status: status,
+        records: secure.records,
+        aliases: secure.aliases,
+        txtRecords: txtRecords,
+      );
+      expect(
+        result.secureTxt,
+        throwsA(
+          isA<DnssecValidationException>().having(
+            (error) => error.status,
+            'status',
+            status,
+          ),
+        ),
+      );
+    }
+  });
+
   for (final entry in {
     'ambiguous': DnssecError.aliasAmbiguous,
     'chain0': DnssecError.aliasTooLong,

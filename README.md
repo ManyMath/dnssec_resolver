@@ -34,8 +34,9 @@ but cannot forge a secure one. Answers are scoped to the queried owner;
 additional-section data is ignored and expanded records are rejected. RRSIGs
 using SHA-1 based algorithms are ignored. The endpoint sees every query the
 validator makes, from the root keys down, and, without a proxy, your address.
-`DnssecResolver.validator` identifies this package to consumers that check a
-`TxtAnswer.validator`, such as `openalias`.
+Consumers must use `lookupTxt` or call `secureTxt()` before accepting TXT data.
+`lookupTxt` propagates unavailable lookup failures; `secureTxt()` rejects
+insecure, bogus, indeterminate, or malformed results.
 
 ## Configuration
 

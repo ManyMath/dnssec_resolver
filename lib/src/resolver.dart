@@ -139,8 +139,6 @@ void _checkAbi() {
 }
 
 class DnssecResolver {
-  static final Object validator = Object();
-
   final DnssecWireTransport transport;
   final Uri endpoint;
   final Duration timeout;
