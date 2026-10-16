@@ -26,5 +26,5 @@ name = "fixtures"
 path = "examples/fixtures.rs"
 
 [profile.release]
-strip = "debuginfo"
+strip = "none"
 lto = "thin"
