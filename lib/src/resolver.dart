@@ -174,43 +174,23 @@ class DnssecResolver {
     );
   }
 
+  /// Starts a lookup. Invalid names and an unavailable validator fail the
+  /// returned operation; an unsupported [recordType] throws [ArgumentError].
   DnssecOperation<DnssecResult> startLookup(
     String domain, {
     int recordType = 16,
   }) {
-    try {
-      domain = normalizeDnssecName(domain);
-    } on DnssecInvalidNameException {
-      rethrow;
-    }
     // A, CNAME, TXT, AAAA.
     if (!const {1, 5, 16, 28}.contains(recordType)) {
       throw ArgumentError.value(recordType, 'recordType');
     }
-    _checkAbi();
-    final config = utf8.encode(
-      jsonEncode({
-        'name': '$domain.',
-        'record_type': recordType,
-        // The Dart deadline must fire first so a timeout is never reported as
-        // an unavailable validator.
-        'timeout_ms': timeout.inMilliseconds + 1000,
-        'max_queries': maxQueries,
-        'trust_anchors': trustAnchors,
-      }),
-    );
-    final pointer = calloc<Uint8>(config.length);
-    late final int handle;
+    final String question;
+    final int handle;
     try {
-      pointer.asTypedList(config.length).setAll(0, config);
-      handle = native.start(pointer, config.length);
-    } finally {
-      calloc.free(pointer);
-    }
-    if (handle == 0) {
-      throw const DnssecUnavailableException(
-        'DNSSEC validator unavailable or busy',
-      );
+      question = normalizeDnssecName(domain);
+      handle = _startValidator(question, recordType);
+    } on DnssecException catch (error) {
+      return DnssecOperation.failed(error);
     }
     final result = Completer<DnssecResult>();
     final pending = <int, DnssecOperation<DnssecWireResponse>>{};
@@ -322,7 +302,7 @@ class DnssecResolver {
           );
           final rawRecords = value['records'] as List;
           final outcome = DnssecResult(
-            question: domain,
+            question: question,
             recordType: recordType,
             canonicalName: normalizeDnssecName(
               value['canonical_name'] as String,
@@ -369,6 +349,35 @@ class DnssecResolver {
       result.future,
       () => fail(const DnssecCancelledException('DNSSEC lookup cancelled')),
     );
+  }
+
+  int _startValidator(String name, int recordType) {
+    _checkAbi();
+    final config = utf8.encode(
+      jsonEncode({
+        'name': '$name.',
+        'record_type': recordType,
+        // The Dart deadline must fire first so a timeout is never reported as
+        // an unavailable validator.
+        'timeout_ms': timeout.inMilliseconds + 1000,
+        'max_queries': maxQueries,
+        'trust_anchors': trustAnchors,
+      }),
+    );
+    final pointer = calloc<Uint8>(config.length);
+    final int handle;
+    try {
+      pointer.asTypedList(config.length).setAll(0, config);
+      handle = native.start(pointer, config.length);
+    } finally {
+      calloc.free(pointer);
+    }
+    if (handle == 0) {
+      throw const DnssecUnavailableException(
+        'DNSSEC validator unavailable or busy',
+      );
+    }
+    return handle;
   }
 }
 

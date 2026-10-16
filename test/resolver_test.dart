@@ -144,6 +144,11 @@ void main() {
           ),
         ),
       );
+      // Starting never throws for a bad name; the operation fails instead.
+      await expectLater(
+        resolver.startLookup(name).result,
+        throwsA(isA<DnssecInvalidNameException>()),
+      );
     }
     expect(transport.queries, isEmpty);
   });
