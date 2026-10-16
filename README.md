@@ -58,7 +58,8 @@ for each platform you build for. Dart SDK 3.10 or later.
 
 ## Development
 
-`bash tool/check.sh` runs format, analyze, the cargo checks and the tests.
+`dart tool/check.dart` runs format, analyze, the cargo checks, the tests and a
+publish dry run.
 `tool/notices.py` regenerates `NOTICES` from the crate licenses.
 
 ## License
