@@ -1,9 +1,10 @@
 ## 0.0.1
 
-- Local DNSSEC validation over a caller-owned, cancellable wire port with bounded queries, secure-only TXT access, validated CNAME chains and exactly-once Age-adjusted TTLs.
+- Local DNSSEC validation over a caller-owned, cancellable wire port (query bytes in, DNS message and cache Age out) with bounded queries, secure-only TXT access, validated CNAME chains and exactly-once Age-adjusted TTLs.
 - Answers are scoped to the queried owner; additional-section data is ignored and expanded records are rejected.
-- Aliases ending in an authenticated NODATA answer report `noRecords`.
+- Aliases ending in an authenticated NODATA answer fail with `DnssecNoRecordsException`.
 - Lookups are limited to A, CNAME, TXT and AAAA.
 - The native ABI version is checked on the first lookup.
 - Identical in-flight questions within one lookup share one exchange.
 - RRSIGs using SHA-1 based algorithms are ignored.
+- Failures are a sealed `DnssecException` hierarchy and are reported through the lookup operation.

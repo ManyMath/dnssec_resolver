@@ -8,47 +8,50 @@ side performs no networking of its own.
 
 ```dart
 import 'package:dnssec_resolver/dnssec_resolver.dart';
-final transport = MyDnssecWireTransport();
+
+final resolver = DnssecResolver(transport: MyDnssecWireTransport());
 try {
-  final resolver = DnssecResolver(transport: transport);
   for (final record in await resolver.lookupTxt('example.com')) {
     print(record.text);
   }
 } on DnssecException catch (error) {
-  print('${error.code.name}: ${error.message}');
-} finally {
-  await transport.close();
+  print(error);
 }
 ```
+
+The transport sends each wire query upstream, for example over DNS over HTTPS,
+reads at most `maxResponseBytes` and returns the DNS message with its cache
+`age`, which is subtracted from every TTL.
 
 `lookup` returns a `DnssecResult` with its `status` (`secure`, `insecure`,
 `bogus`, `indeterminate`), records and CNAME aliases. `lookupTxt` and
 `DnssecResult.secureTxt()` return TXT records from a `secure` answer and throw
-`DnssecException` otherwise. Record types: A, CNAME, TXT and AAAA.
+a `DnssecException` otherwise. `startLookup` and `startTxtLookup` return a
+cancellable `DnssecOperation` whose `result` carries every failure, including
+an invalid name. Record types: A, CNAME, TXT and AAAA.
 
 ## Trust model
 
 Every answer is validated locally from the trust anchors down to the queried
-owner. The DoH endpoint is only a transport: it can withhold or delay answers
+owner. The transport and the upstream resolver can withhold or delay answers
 but cannot forge a secure one. Answers are scoped to the queried owner;
 additional-section data is ignored and expanded records are rejected. RRSIGs
-using SHA-1 based algorithms are ignored. The endpoint sees every query the
-validator makes, from the root keys down, and, without a proxy, your address.
-Consumers must use `lookupTxt` or call `secureTxt()` before accepting TXT data.
-`lookupTxt` propagates unavailable lookup failures; `secureTxt()` rejects
-insecure, bogus, indeterminate, or malformed results.
+using SHA-1 based algorithms are ignored. The upstream resolver sees every
+query the validator makes, from the root keys down, and, without a proxy, your
+address. Consumers must use `lookupTxt` or call `secureTxt()` before accepting
+TXT data. `secureTxt()` throws `DnssecValidationException` for insecure, bogus
+or indeterminate results and `DnssecMalformedResponseException` for malformed
+ones.
 
 ## Configuration
 
-- `endpoint`: an RFC 8484 URI, `https://dns.google/dns-query` by default.
 - `timeout` 20 s (at most 2 minutes) for a whole lookup, including its
   sub-queries.
 - `maxQueries` 64 (at most 128) per lookup.
 - `trustAnchors`: DNSKEY records in zone presentation format; the IANA root
   keys by default.
-- Proxy, fixed destination, connection reuse and transport deadlines belong to
-  the caller-supplied transport. The `cs_openalias` facade provides the
-  production adapter for `doh_transport`.
+- Endpoint, proxy, connection reuse and transport deadlines belong to the
+  caller-supplied transport.
 
 ## Building
 
