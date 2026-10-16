@@ -3,142 +3,144 @@ import 'dart:convert';
 
 enum DnssecStatus { secure, insecure, bogus, indeterminate }
 
-enum DnssecError {
-  secure,
-  insecure,
-  bogus,
-  indeterminate,
-  aliasAmbiguous,
-  aliasTooLong,
-  aliasLoop,
-  noRecords,
-  invalidName,
-  responseTooLarge,
-  questionMismatch,
-  queryFailed,
-  transport,
-  unavailable,
-  cancelled,
-  timedOut,
-  malformedResponse,
-}
-
 sealed class DnssecException implements Exception {
-  final DnssecError code;
   final String message;
-  final DnssecStatus? status;
   final Object? cause;
   final StackTrace? causeStackTrace;
 
-  const DnssecException(
-    this.code,
-    this.message, {
-    this.status,
-    this.cause,
-    this.causeStackTrace,
-  });
+  const DnssecException(this.message, {this.cause, this.causeStackTrace});
 
   @override
-  String toString() {
-    final details = switch (this) {
-      DnssecQueryFailedException(:final rcode) when rcode != null =>
-        ', rcode: $rcode',
-      DnssecTransportException(:final httpStatus) when httpStatus != null =>
-        ', httpStatus: $httpStatus',
-      DnssecTimeoutException(:final timeout) => ', timeout: $timeout',
-      _ when status != null => ', status: ${status!.name}',
-      _ => '',
-    };
-    return '$runtimeType(code: ${code.name}$details): $message';
-  }
+  String toString() => '$runtimeType: $message';
 }
 
+/// The validator did not prove the answer secure.
 final class DnssecValidationException extends DnssecException {
+  final DnssecStatus status;
+
   DnssecValidationException(
-    DnssecStatus status, {
-    String message = 'DNSSEC validation did not establish a secure answer',
-  }) : super(DnssecError.values.byName(status.name), message, status: status);
+    super.message, {
+    required this.status,
+    super.cause,
+    super.causeStackTrace,
+  }) {
+    if (status == DnssecStatus.secure) {
+      throw ArgumentError.value(status, 'status', 'Not a validation failure');
+    }
+  }
+
+  @override
+  String toString() => '$runtimeType(status: ${status.name}): $message';
 }
 
 final class DnssecAliasAmbiguousException extends DnssecException {
-  const DnssecAliasAmbiguousException(String message)
-    : super(DnssecError.aliasAmbiguous, message);
+  const DnssecAliasAmbiguousException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecAliasTooLongException extends DnssecException {
-  const DnssecAliasTooLongException(String message)
-    : super(DnssecError.aliasTooLong, message);
+  const DnssecAliasTooLongException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecAliasLoopException extends DnssecException {
-  const DnssecAliasLoopException(String message)
-    : super(DnssecError.aliasLoop, message);
+  const DnssecAliasLoopException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecNoRecordsException extends DnssecException {
-  const DnssecNoRecordsException(String message)
-    : super(DnssecError.noRecords, message);
+  const DnssecNoRecordsException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecInvalidNameException extends DnssecException {
-  const DnssecInvalidNameException(String message)
-    : super(DnssecError.invalidName, message);
+  const DnssecInvalidNameException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecResponseTooLargeException extends DnssecException {
-  const DnssecResponseTooLargeException(String message)
-    : super(DnssecError.responseTooLarge, message);
+  const DnssecResponseTooLargeException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecQuestionMismatchException extends DnssecException {
-  const DnssecQuestionMismatchException(String message)
-    : super(DnssecError.questionMismatch, message);
+  const DnssecQuestionMismatchException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecQueryFailedException extends DnssecException {
-  final int? rcode;
-
-  const DnssecQueryFailedException(String message, {this.rcode})
-    : super(DnssecError.queryFailed, message);
+  const DnssecQueryFailedException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecTransportException extends DnssecException {
-  final int? httpStatus;
-
   const DnssecTransportException(
-    String message, {
-    this.httpStatus,
+    super.message, {
     super.cause,
     super.causeStackTrace,
-  }) : super(DnssecError.transport, message);
+  });
 }
 
 final class DnssecUnavailableException extends DnssecException {
   const DnssecUnavailableException(
-    String message, {
+    super.message, {
     super.cause,
     super.causeStackTrace,
-  }) : super(DnssecError.unavailable, message);
+  });
 }
 
 final class DnssecCancelledException extends DnssecException {
-  const DnssecCancelledException(String message)
-    : super(DnssecError.cancelled, message);
+  const DnssecCancelledException(
+    super.message, {
+    super.cause,
+    super.causeStackTrace,
+  });
 }
 
 final class DnssecTimeoutException extends DnssecException {
   final Duration timeout;
 
-  const DnssecTimeoutException(String message, {required this.timeout})
-    : super(DnssecError.timedOut, message);
+  const DnssecTimeoutException(
+    super.message, {
+    required this.timeout,
+    super.cause,
+    super.causeStackTrace,
+  });
+
+  @override
+  String toString() => '$runtimeType(timeout: $timeout): $message';
 }
 
 final class DnssecMalformedResponseException extends DnssecException {
   const DnssecMalformedResponseException(
-    String message, {
+    super.message, {
     super.cause,
     super.causeStackTrace,
-  }) : super(DnssecError.malformedResponse, message);
+  });
 }
 
 class DnssecOperation<T> {
@@ -187,7 +189,7 @@ final _label = RegExp(r'^[a-z0-9_-]+$');
 
 String normalizeDnssecName(String name) {
   if (name.codeUnits.any((code) => code > 0x7f)) {
-    throw const DnssecInvalidNameException('Use ASCII DNS names');
+    throw const DnssecInvalidNameException('DNS name is not ASCII');
   }
   final value = (name.endsWith('.') ? name.substring(0, name.length - 1) : name)
       .toLowerCase();

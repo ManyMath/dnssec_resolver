@@ -29,7 +29,10 @@ class DnssecResult {
 
   List<DnssecTxtRecord> secureTxt() {
     if (status != DnssecStatus.secure) {
-      throw DnssecValidationException(status);
+      throw DnssecValidationException(
+        'DNSSEC validation did not establish a secure answer',
+        status: status,
+      );
     }
     const malformed = DnssecMalformedResponseException(
       'Invalid secure TXT result',
@@ -271,7 +274,7 @@ class DnssecResolver {
           }
           if (event.containsKey('error')) {
             final name = event['error'];
-            throw _nativeFailure(name);
+            throw _nativeFailure(name, timeout);
           }
           final value = event['result'] as Map<String, dynamic>;
           final statusName = value['status'];
@@ -279,7 +282,7 @@ class DnssecResolver {
               .where((item) => item.name == statusName)
               .firstOrNull;
           if (status == null) {
-            throw _nativeFailure(statusName);
+            throw _nativeFailure(statusName, timeout);
           }
           DnssecRecord record(dynamic raw) => DnssecRecord(
             name: normalizeDnssecName(raw['name'] as String),
@@ -367,42 +370,17 @@ DnssecException _mapPortFailure(Object error, StackTrace stack) {
   );
 }
 
-DnssecException _nativeFailure(Object? name) {
-  final code = _errorNamed(name) ?? DnssecError.unavailable;
+DnssecException _nativeFailure(Object? name, Duration timeout) {
   final message = 'DNSSEC validator failed: $name';
-  return switch (code) {
-    DnssecError.secure ||
-    DnssecError.insecure ||
-    DnssecError.bogus ||
-    DnssecError.indeterminate => DnssecValidationException(
-      _statusNamed(name) ?? DnssecStatus.indeterminate,
-      message: message,
-    ),
-    DnssecError.aliasAmbiguous => DnssecAliasAmbiguousException(message),
-    DnssecError.aliasTooLong => DnssecAliasTooLongException(message),
-    DnssecError.aliasLoop => DnssecAliasLoopException(message),
-    DnssecError.noRecords => DnssecNoRecordsException(message),
-    DnssecError.invalidName => DnssecInvalidNameException(message),
-    DnssecError.responseTooLarge => DnssecResponseTooLargeException(message),
-    DnssecError.questionMismatch => DnssecQuestionMismatchException(message),
-    DnssecError.queryFailed => DnssecQueryFailedException(message),
-    DnssecError.transport => DnssecTransportException(message),
-    DnssecError.cancelled => DnssecCancelledException(message),
-    DnssecError.timedOut => DnssecTimeoutException(
-      message,
-      timeout: Duration.zero,
-    ),
-    DnssecError.malformedResponse => DnssecMalformedResponseException(message),
-    DnssecError.unavailable => DnssecUnavailableException(message),
+  return switch (name) {
+    'aliasAmbiguous' => DnssecAliasAmbiguousException(message),
+    'aliasTooLong' => DnssecAliasTooLongException(message),
+    'aliasLoop' => DnssecAliasLoopException(message),
+    'noRecords' => DnssecNoRecordsException(message),
+    'responseTooLarge' => DnssecResponseTooLargeException(message),
+    'queryFailed' => DnssecQueryFailedException(message),
+    'cancelled' => DnssecCancelledException(message),
+    'timedOut' => DnssecTimeoutException(message, timeout: timeout),
+    _ => DnssecUnavailableException(message),
   };
-}
-
-DnssecError? _errorNamed(Object? name) {
-  if (name is! String) return null;
-  return DnssecError.values.where((item) => item.name == name).firstOrNull;
-}
-
-DnssecStatus? _statusNamed(Object? name) {
-  if (name is! String) return null;
-  return DnssecStatus.values.where((item) => item.name == name).firstOrNull;
 }

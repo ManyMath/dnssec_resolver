@@ -136,13 +136,7 @@ void main() {
     for (final name in ['', 'a..test', 'a\\.b.test', '*.example.test']) {
       await expectLater(
         resolver.lookupTxt(name),
-        throwsA(
-          isA<DnssecException>().having(
-            (e) => e.code,
-            'code',
-            DnssecError.invalidName,
-          ),
-        ),
+        throwsA(isA<DnssecInvalidNameException>()),
       );
       // Starting never throws for a bad name; the operation fails instead.
       await expectLater(
@@ -159,9 +153,11 @@ void main() {
     expect(
       result.secureTxt,
       throwsA(
-        isA<DnssecException>()
-            .having((error) => error.code, 'code', DnssecError.insecure)
-            .having((error) => error.status, 'status', DnssecStatus.insecure),
+        isA<DnssecValidationException>().having(
+          (error) => error.status,
+          'status',
+          DnssecStatus.insecure,
+        ),
       ),
     );
     final bogus = await resolver.lookup('tampered.example.test');
@@ -218,13 +214,7 @@ void main() {
     test('$name alias ending in authenticated NODATA has no records', () async {
       await expectLater(
         resolver.lookupTxt('$name.example.test'),
-        throwsA(
-          isA<DnssecException>().having(
-            (e) => e.code,
-            'code',
-            DnssecError.noRecords,
-          ),
-        ),
+        throwsA(isA<DnssecNoRecordsException>()),
       );
     });
   }
@@ -345,13 +335,7 @@ void main() {
     for (final malformed in [looping, withoutTxt]) {
       expect(
         malformed.secureTxt,
-        throwsA(
-          isA<DnssecException>().having(
-            (error) => error.code,
-            'code',
-            DnssecError.malformedResponse,
-          ),
-        ),
+        throwsA(isA<DnssecMalformedResponseException>()),
       );
     }
   });
@@ -386,15 +370,13 @@ void main() {
   });
 
   for (final entry in {
-    'ambiguous': DnssecError.aliasAmbiguous,
-    'chain0': DnssecError.aliasTooLong,
+    'ambiguous': isA<DnssecAliasAmbiguousException>(),
+    'chain0': isA<DnssecAliasTooLongException>(),
   }.entries) {
     test('rejects ${entry.key} CNAME chain', () async {
       await expectLater(
         resolver.lookupTxt('${entry.key}.example.test'),
-        throwsA(
-          isA<DnssecException>().having((e) => e.code, 'code', entry.value),
-        ),
+        throwsA(entry.value),
       );
     });
   }
@@ -403,13 +385,7 @@ void main() {
     test('rejects $name CNAME loop', () async {
       await expectLater(
         resolver.lookupTxt('$name.example.test'),
-        throwsA(
-          isA<DnssecException>().having(
-            (e) => e.code,
-            'code',
-            DnssecError.aliasLoop,
-          ),
-        ),
+        throwsA(isA<DnssecAliasLoopException>()),
       );
     });
   }
@@ -417,26 +393,14 @@ void main() {
   test('authenticated NODATA never supplies a recipient', () async {
     await expectLater(
       resolver.lookupTxt('empty.example.test'),
-      throwsA(
-        isA<DnssecException>().having(
-          (e) => e.code,
-          'code',
-          DnssecError.noRecords,
-        ),
-      ),
+      throwsA(isA<DnssecNoRecordsException>()),
     );
   });
 
   test('NSEC3 authenticated NODATA never supplies a recipient', () async {
     await expectLater(
       resolver.lookupTxt('nsec3.example.test'),
-      throwsA(
-        isA<DnssecException>().having(
-          (e) => e.code,
-          'code',
-          DnssecError.noRecords,
-        ),
-      ),
+      throwsA(isA<DnssecNoRecordsException>()),
     );
   });
 
@@ -444,13 +408,7 @@ void main() {
     test('secure NXDOMAIN for $name never supplies a recipient', () async {
       await expectLater(
         resolver.lookupTxt(name),
-        throwsA(
-          isA<DnssecException>().having(
-            (e) => e.code,
-            'code',
-            DnssecError.noRecords,
-          ),
-        ),
+        throwsA(isA<DnssecNoRecordsException>()),
       );
     });
   }
@@ -536,11 +494,13 @@ void main() {
         final failed = expectLater(
           operation.result,
           throwsA(
-            isA<DnssecException>().having(
-              (e) => e.code,
-              'code',
-              cancel ? DnssecError.cancelled : DnssecError.timedOut,
-            ),
+            cancel
+                ? isA<DnssecCancelledException>()
+                : isA<DnssecTimeoutException>().having(
+                    (e) => e.timeout,
+                    'timeout',
+                    const Duration(milliseconds: 300),
+                  ),
           ),
         );
         await stalled.started.future;
@@ -569,37 +529,61 @@ void main() {
   );
 
   test('exception leaves expose structured fields and readable types', () {
-    final validation = DnssecValidationException(DnssecStatus.bogus);
-    expect(validation, isA<DnssecValidationException>());
-    expect(validation.code, DnssecError.bogus);
+    final validation = DnssecValidationException(
+      'not secure',
+      status: DnssecStatus.bogus,
+    );
+    expect(validation, isA<DnssecException>());
     expect(validation.status, DnssecStatus.bogus);
-    expect(validation.toString(), contains('DnssecValidationException'));
-    expect(validation.toString(), contains('bogus'));
+    expect(
+      validation.toString(),
+      'DnssecValidationException(status: bogus): not secure',
+    );
+    expect(
+      () => DnssecValidationException('secure', status: DnssecStatus.secure),
+      throwsArgumentError,
+    );
 
     final cause = StateError('socket');
     final stack = StackTrace.current;
     final transport = DnssecTransportException(
-      'HTTP failed',
-      httpStatus: 503,
+      'exchange failed',
       cause: cause,
       causeStackTrace: stack,
     );
-    expect(transport, isA<DnssecTransportException>());
-    expect(transport.code, DnssecError.transport);
-    expect(transport.httpStatus, 503);
     expect(transport.cause, same(cause));
     expect(transport.causeStackTrace, same(stack));
-    expect(transport.toString(), contains('DnssecTransportException'));
-    expect(transport.toString(), contains('httpStatus: 503'));
+    expect(transport.toString(), 'DnssecTransportException: exchange failed');
 
     const timeout = DnssecTimeoutException(
       'deadline',
       timeout: Duration(seconds: 20),
     );
-    expect(timeout.code, DnssecError.timedOut);
     expect(timeout.timeout, const Duration(seconds: 20));
-    expect(timeout.toString(), contains('deadline'));
-    expect(timeout.toString(), contains('timeout: 0:00:20.000000'));
+    expect(
+      timeout.toString(),
+      'DnssecTimeoutException(timeout: 0:00:20.000000): deadline',
+    );
+
+    const leaves = <DnssecException>[
+      DnssecAliasAmbiguousException('m', cause: 'payload'),
+      DnssecAliasTooLongException('m', cause: 'payload'),
+      DnssecAliasLoopException('m', cause: 'payload'),
+      DnssecNoRecordsException('m', cause: 'payload'),
+      DnssecInvalidNameException('m', cause: 'payload'),
+      DnssecResponseTooLargeException('m', cause: 'payload'),
+      DnssecQuestionMismatchException('m', cause: 'payload'),
+      DnssecQueryFailedException('m', cause: 'payload'),
+      DnssecUnavailableException('m', cause: 'payload'),
+      DnssecCancelledException('m', cause: 'payload'),
+      DnssecMalformedResponseException('m', cause: 'payload'),
+    ];
+    for (final error in leaves) {
+      expect(error.message, 'm');
+      expect(error.cause, 'payload');
+      expect(error.toString(), '${error.runtimeType}: m');
+    }
+    expect(leaves.map((e) => e.runtimeType).toSet(), hasLength(leaves.length));
   });
 
   test(
