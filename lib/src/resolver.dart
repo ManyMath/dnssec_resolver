@@ -13,7 +13,6 @@ class DnssecResult {
   final String question;
   final int recordType;
   final String canonicalName;
-  final Uri resolver;
   final DnssecStatus status;
   final List<DnssecRecord> records;
   final List<DnssecRecord> aliases;
@@ -23,7 +22,6 @@ class DnssecResult {
     required this.question,
     required this.recordType,
     required this.canonicalName,
-    required this.resolver,
     required this.status,
     required List<DnssecRecord> records,
     required List<DnssecRecord> aliases,
@@ -116,6 +114,7 @@ class DnssecResult {
 }
 
 const _abiVersion = 1;
+const _maxMessageBytes = 65535;
 bool _abiChecked = false;
 
 void _checkAbi() {
@@ -140,20 +139,17 @@ void _checkAbi() {
 
 class DnssecResolver {
   final DnssecWireTransport transport;
-  final Uri endpoint;
   final Duration timeout;
   final int maxQueries;
   final String? trustAnchors;
 
   DnssecResolver({
     required this.transport,
-    Uri? endpoint,
     this.timeout = const Duration(seconds: 20),
     this.maxQueries = 64,
     this.trustAnchors,
-  }) : endpoint = endpoint ?? Uri.https('dns.google', '/dns-query') {
-    if (!_isUsableDohEndpoint(this.endpoint) ||
-        timeout.inMilliseconds < 1 ||
+  }) {
+    if (timeout.inMilliseconds < 1 ||
         timeout > const Duration(minutes: 2) ||
         maxQueries < 1 ||
         maxQueries > 128 ||
@@ -251,34 +247,29 @@ class DnssecResolver {
         if (done) return;
         final query = List<int>.unmodifiable(bytes);
         final operation = transport.startWire(
-          endpoint,
           query,
-          maxResponseBytes: 65535,
+          maxResponseBytes: _maxMessageBytes,
         );
         pending[id] = operation;
         final response = await operation.result;
         if (done) return;
-        // Re-checked here so a custom transport cannot bypass the bounds.
-        if (response.statusCode != 200) {
-          throw DnssecTransportException(
-            'DNS HTTPS request failed',
-            httpStatus: response.statusCode,
+        // Re-checked here so a custom transport cannot bypass the bound.
+        if (response.message.length > _maxMessageBytes) {
+          throw const DnssecResponseTooLargeException(
+            'DNS message exceeds limit',
           );
-        }
-        if (response.body.length > 65535) {
-          throw const DnssecResponseTooLargeException('DNS body exceeds limit');
         }
         // Match the exact native query before applying Age. This package owns
         // both checks and does not trust a port implementation to do either.
-        final body = validateAndAgeDnssecWireResponse(
+        final message = validateAndAgeDnssecWireResponse(
           query,
-          response.body,
+          response.message,
           age: response.age,
         );
-        final pointer = calloc<Uint8>(body.length + 1);
+        final pointer = calloc<Uint8>(message.length + 1);
         try {
-          pointer.asTypedList(body.length).setAll(0, body);
-          native.answer(handle, id, pointer, body.length);
+          pointer.asTypedList(message.length).setAll(0, message);
+          native.answer(handle, id, pointer, message.length);
         } finally {
           calloc.free(pointer);
         }
@@ -336,7 +327,6 @@ class DnssecResolver {
             canonicalName: normalizeDnssecName(
               value['canonical_name'] as String,
             ),
-            resolver: endpoint,
             status: status,
             records: rawRecords.map(record).toList(),
             aliases: (value['aliases'] as List).map(record).toList(),
@@ -379,20 +369,6 @@ class DnssecResolver {
       result.future,
       () => fail(const DnssecCancelledException('DNSSEC lookup cancelled')),
     );
-  }
-}
-
-bool _isUsableDohEndpoint(Uri uri) {
-  if (uri.scheme != 'https' ||
-      uri.host.isEmpty ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasFragment) {
-    return false;
-  }
-  try {
-    return uri.port >= 1 && uri.port <= 65535;
-  } on FormatException {
-    return false;
   }
 }
 

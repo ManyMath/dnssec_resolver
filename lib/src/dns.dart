@@ -155,28 +155,30 @@ class DnssecOperation<T> {
 }
 
 final class DnssecWireResponse {
-  final int statusCode;
-  final List<int> body;
+  final List<int> message;
+
+  /// Time the message spent in caches, such as an HTTP `Age`. It is
+  /// subtracted from every TTL before validation.
   final Duration age;
 
-  DnssecWireResponse(
-    this.statusCode,
-    List<int> body, {
-    this.age = Duration.zero,
-  }) : body = List<int>.unmodifiable(body) {
-    if (statusCode < 100 || statusCode > 599) {
-      throw ArgumentError.value(statusCode, 'statusCode');
-    }
+  DnssecWireResponse(List<int> message, {this.age = Duration.zero})
+    : message = List<int>.unmodifiable(message) {
     if (age < Duration.zero) throw ArgumentError.value(age, 'age');
-    if (this.body.any((byte) => byte < 0 || byte > 255)) {
-      throw ArgumentError.value(body, 'body', 'DNS body must contain octets');
+    if (this.message.any((byte) => byte < 0 || byte > 255)) {
+      throw ArgumentError.value(
+        message,
+        'message',
+        'DNS message must contain octets',
+      );
     }
   }
 }
 
 abstract interface class DnssecWireTransport {
+  /// Sends one DNS wire [query] upstream. Implementations stop reading a
+  /// response after [maxResponseBytes] and report every failure through the
+  /// returned operation.
   DnssecOperation<DnssecWireResponse> startWire(
-    Uri endpoint,
     List<int> query, {
     required int maxResponseBytes,
   });

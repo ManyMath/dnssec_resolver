@@ -3,6 +3,21 @@ import 'package:dnssec_resolver/src/wire.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('port response snapshots octets and rejects a negative Age', () {
+    final bytes = [1, 2, 3];
+    final response = DnssecWireResponse(bytes, age: const Duration(seconds: 5));
+    bytes[0] = 9;
+    expect(response.message, [1, 2, 3]);
+    expect(response.age, const Duration(seconds: 5));
+    expect(() => response.message.add(0), throwsUnsupportedError);
+    expect(DnssecWireResponse(bytes).age, Duration.zero);
+    expect(
+      () => DnssecWireResponse(bytes, age: const Duration(seconds: -1)),
+      throwsArgumentError,
+    );
+    expect(() => DnssecWireResponse([256]), throwsArgumentError);
+  });
+
   test('Age is applied once to non-OPT TTL and output is immutable', () {
     final query = _query();
     final response = _response(ttl: 300);

@@ -106,6 +106,22 @@ void main() {
     );
   });
 
+  test('rejects out-of-range configuration', () {
+    for (final create in <void Function()>[
+      () => DnssecResolver(transport: transport, timeout: Duration.zero),
+      () => DnssecResolver(
+        transport: transport,
+        timeout: const Duration(minutes: 2, milliseconds: 1),
+      ),
+      () => DnssecResolver(transport: transport, maxQueries: 0),
+      () => DnssecResolver(transport: transport, maxQueries: 129),
+      () => DnssecResolver(transport: transport, trustAnchors: ' '),
+      () => DnssecResolver(transport: transport, trustAnchors: 'a' * 60001),
+    ]) {
+      expect(create, throwsArgumentError);
+    }
+  });
+
   test('rejects unsupported record types and invalid names', () async {
     for (final type in [0, 2, 41, 99, 128, 250, 255, 256]) {
       expect(
@@ -228,22 +244,26 @@ void main() {
     expect(result.single.ttl, 0);
   });
 
-  test('rejects a non-200 or oversized transport response itself', () async {
-    transport = FixtureTransport(fixtures, statusCode: 500);
-    resolver = DnssecResolver(
-      transport: transport,
-      trustAnchors: fixtures.anchor,
-    );
-    await expectLater(
-      resolver.lookupTxt('alice.example.test'),
-      throwsA(
-        isA<DnssecTransportException>().having(
-          (error) => error.httpStatus,
-          'httpStatus',
-          500,
+  test('maps port failures and rejects an oversized response itself', () async {
+    final failure = StateError('upstream failed');
+    for (final port in [
+      FixtureTransport(fixtures, failure: failure),
+      FixtureTransport(fixtures, mutate: (_, _) => throw failure),
+    ]) {
+      await expectLater(
+        DnssecResolver(
+          transport: port,
+          trustAnchors: fixtures.anchor,
+        ).lookupTxt('alice.example.test'),
+        throwsA(
+          isA<DnssecTransportException>().having(
+            (error) => error.cause,
+            'cause',
+            same(failure),
+          ),
         ),
-      ),
-    );
+      );
+    }
     transport = FixtureTransport(
       fixtures,
       mutate: (_, _) => List<int>.filled(65536, 0),
@@ -256,6 +276,20 @@ void main() {
       resolver.lookupTxt('alice.example.test'),
       throwsA(isA<DnssecResponseTooLargeException>()),
     );
+  });
+
+  test('cache Age is subtracted from validated TTLs', () async {
+    final fresh = await resolver.lookupTxt('alice.example.test');
+    transport = FixtureTransport(
+      fixtures,
+      age: const Duration(seconds: 100, milliseconds: 999),
+    );
+    resolver = DnssecResolver(
+      transport: transport,
+      trustAnchors: fixtures.anchor,
+    );
+    final aged = await resolver.lookupTxt('alice.example.test');
+    expect(aged.single.ttl, fresh.single.ttl - 100);
   });
 
   test('upstream TTL cannot exceed the signed TTL', () async {
@@ -274,7 +308,6 @@ void main() {
       question: result.question,
       recordType: result.recordType,
       canonicalName: result.canonicalName,
-      resolver: result.resolver,
       status: result.status,
       records: result.records,
       aliases: [
@@ -312,7 +345,6 @@ void main() {
         question: secure.question,
         recordType: secure.recordType,
         canonicalName: secure.canonicalName,
-        resolver: secure.resolver,
         status: status,
         records: secure.records,
         aliases: secure.aliases,
@@ -572,7 +604,6 @@ class StalledTransport implements DnssecWireTransport {
   bool cancelled = false;
   @override
   DnssecOperation<DnssecWireResponse> startWire(
-    Uri endpoint,
     List<int> query, {
     required int maxResponseBytes,
   }) {

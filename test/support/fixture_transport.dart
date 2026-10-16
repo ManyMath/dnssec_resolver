@@ -62,25 +62,32 @@ class FixtureTransport implements DnssecWireTransport {
   final Fixtures fixtures;
   final List<List<int>> queries = [];
   final List<int> Function(List<int> query, List<int> reply)? mutate;
-  final int statusCode;
+  final Duration age;
+  final Object? failure;
   int cancellations = 0;
-  FixtureTransport(this.fixtures, {this.mutate, this.statusCode = 200});
+  FixtureTransport(
+    this.fixtures, {
+    this.mutate,
+    this.age = Duration.zero,
+    this.failure,
+  });
 
   @override
   DnssecOperation<DnssecWireResponse> startWire(
-    Uri endpoint,
     List<int> query, {
     required int maxResponseBytes,
   }) {
     queries.add(query);
     final reply = fixtures.reply(query);
     return DnssecOperation(
-      Future.value(
-        DnssecWireResponse(
-          statusCode,
-          mutate == null ? reply : mutate!(query, reply),
-        ),
-      ),
+      failure == null
+          ? Future.value(
+              DnssecWireResponse(
+                mutate == null ? reply : mutate!(query, reply),
+                age: age,
+              ),
+            )
+          : Future.error(failure!),
       () => cancellations++,
     );
   }
