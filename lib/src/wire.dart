@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'dns.dart';
@@ -29,7 +30,7 @@ List<int> validateAndAgeDnssecWireResponse(
   final adjusted = Uint8List.fromList(response);
   for (final offset in reply.ttlOffsets) {
     final ttl = _u16(response, offset) << 16 | _u16(response, offset + 2);
-    final effective = effectiveDnssecTtl(ttl, age: age);
+    final effective = _effectiveTtl(ttl, age);
     adjusted
       ..[offset] = effective >> 24
       ..[offset + 1] = effective >> 16 & 0xff
@@ -38,6 +39,10 @@ List<int> validateAndAgeDnssecWireResponse(
   }
   return List<int>.unmodifiable(adjusted);
 }
+
+// RFC 2181 section 8: a TTL with the most significant bit set is zero.
+int _effectiveTtl(int ttl, Duration age) =>
+    max(0, (ttl > 0x7fffffff ? 0 : ttl) - age.inSeconds);
 
 int _u16(List<int> data, int offset) => data[offset] << 8 | data[offset + 1];
 

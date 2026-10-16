@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 enum DnssecStatus { secure, insecure, bogus, indeterminate }
 
@@ -205,12 +204,6 @@ String normalizeDnssecName(String name) {
     throw const DnssecInvalidNameException('Invalid ASCII DNS name');
   }
   return value;
-}
-
-int effectiveDnssecTtl(int ttl, {Duration age = Duration.zero}) {
-  if (ttl < 0 || ttl > 0xffffffff) throw ArgumentError.value(ttl, 'ttl');
-  if (age < Duration.zero) throw ArgumentError.value(age, 'age');
-  return max(0, (ttl > 0x7fffffff ? 0 : ttl) - age.inSeconds);
 }
 
 class DnssecRecord {
