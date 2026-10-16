@@ -75,6 +75,16 @@ The build hook compiles `native/` with `cargo build --locked`. Building needs
 rustup with the toolchain in `native/rust-toolchain.toml` and the Rust target
 for each platform you build for. Dart SDK 3.10 or later.
 
+## Development
+
+Run the checks (format, analyze, cargo, tests, publish dry run) and regenerate
+`NOTICES` from the crate licenses with the tools in the repository:
+
+```sh
+dart tool/check.dart
+python3 tool/notices.py
+```
+
 ## License
 
 MIT; see `LICENSE`. `NOTICES` lists the licenses of the bundled Rust crates.
