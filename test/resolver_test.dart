@@ -308,8 +308,9 @@ void main() {
     expect(records.single.text, contains('valid'));
     expect(() => records.add(records.single), throwsUnsupportedError);
     expect(() => result.records.clear(), throwsUnsupportedError);
+    expect(() => result.records.single.txt!.add(0), throwsUnsupportedError);
 
-    final malformed = DnssecResult(
+    final looping = DnssecResult(
       question: result.question,
       recordType: result.recordType,
       canonicalName: result.canonicalName,
@@ -317,30 +318,47 @@ void main() {
       records: result.records,
       aliases: [
         ...result.aliases,
-        const DnssecRecord(
+        DnssecRecord(
           name: 'alias.example.test',
           type: 5,
           ttl: 1,
           data: 'alias.example.test.',
         ),
       ],
-      txtRecords: records,
     );
-    expect(
-      malformed.secureTxt,
-      throwsA(
-        isA<DnssecException>().having(
-          (error) => error.code,
-          'code',
-          DnssecError.malformedResponse,
+    final withoutTxt = DnssecResult(
+      question: result.question,
+      recordType: result.recordType,
+      canonicalName: result.canonicalName,
+      status: result.status,
+      records: [
+        for (final record in result.records)
+          DnssecRecord(
+            name: record.name,
+            type: record.type,
+            ttl: record.ttl,
+            data: record.data,
+          ),
+      ],
+      aliases: result.aliases,
+    );
+    for (final malformed in [looping, withoutTxt]) {
+      expect(
+        malformed.secureTxt,
+        throwsA(
+          isA<DnssecException>().having(
+            (error) => error.code,
+            'code',
+            DnssecError.malformedResponse,
+          ),
         ),
-      ),
-    );
+      );
+    }
   });
 
   test('secure TXT accessor rejects every non-secure status', () async {
     final secure = await resolver.lookup('alice.example.test');
-    final txtRecords = secure.secureTxt();
+    expect(secure.secureTxt().single.text, contains('valid'));
     for (final status in [
       DnssecStatus.insecure,
       DnssecStatus.bogus,
@@ -353,7 +371,6 @@ void main() {
         status: status,
         records: secure.records,
         aliases: secure.aliases,
-        txtRecords: txtRecords,
       );
       expect(
         result.secureTxt,

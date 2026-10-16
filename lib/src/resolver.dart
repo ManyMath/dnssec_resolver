@@ -16,7 +16,6 @@ class DnssecResult {
   final DnssecStatus status;
   final List<DnssecRecord> records;
   final List<DnssecRecord> aliases;
-  final List<DnssecTxtRecord> _txtRecords;
 
   DnssecResult({
     required this.question,
@@ -25,10 +24,8 @@ class DnssecResult {
     required this.status,
     required List<DnssecRecord> records,
     required List<DnssecRecord> aliases,
-    required List<DnssecTxtRecord> txtRecords,
   }) : records = List.unmodifiable(records),
-       aliases = List.unmodifiable(aliases),
-       _txtRecords = List.unmodifiable(txtRecords);
+       aliases = List.unmodifiable(aliases);
 
   List<DnssecTxtRecord> secureTxt() {
     if (status != DnssecStatus.secure) {
@@ -40,7 +37,6 @@ class DnssecResult {
     if (recordType != 16 ||
         records.isEmpty ||
         records.length > 64 ||
-        records.length != _txtRecords.length ||
         aliases.length > 7) {
       throw malformed;
     }
@@ -82,32 +78,23 @@ class DnssecResult {
     if (owner != normalizedCanonical) throw malformed;
 
     final txt = <DnssecTxtRecord>[];
-    for (var i = 0; i < records.length; i++) {
-      final record = records[i];
-      final value = _txtRecords[i];
+    for (final record in records) {
+      final bytes = record.txt;
       late final String recordName;
-      late final String txtName;
       try {
         recordName = normalizeDnssecName(record.name);
-        txtName = normalizeDnssecName(value.name);
       } on DnssecException {
         throw malformed;
       }
-      if (record.type != 16 ||
+      if (bytes == null ||
+          record.type != 16 ||
           record.ttl < 0 ||
           record.ttl > 0xffffffff ||
-          value.ttl < 0 ||
-          value.ttl > 0xffffffff ||
           record.name != recordName ||
-          value.name != txtName ||
-          recordName != normalizedCanonical ||
-          txtName != normalizedCanonical ||
-          record.ttl != value.ttl) {
+          recordName != normalizedCanonical) {
         throw malformed;
       }
-      txt.add(
-        DnssecTxtRecord(name: txtName, ttl: value.ttl, bytes: value.bytes),
-      );
+      txt.add(DnssecTxtRecord(name: recordName, ttl: record.ttl, bytes: bytes));
     }
     return List.unmodifiable(txt);
   }
@@ -299,8 +286,8 @@ class DnssecResolver {
             type: raw['record_type'] as int,
             ttl: raw['ttl'] as int,
             data: raw['data'] as String,
+            txt: (raw['txt'] as List?)?.cast<int>(),
           );
-          final rawRecords = value['records'] as List;
           final outcome = DnssecResult(
             question: question,
             recordType: recordType,
@@ -308,18 +295,8 @@ class DnssecResolver {
               value['canonical_name'] as String,
             ),
             status: status,
-            records: rawRecords.map(record).toList(),
+            records: (value['records'] as List).map(record).toList(),
             aliases: (value['aliases'] as List).map(record).toList(),
-            txtRecords: rawRecords
-                .where((raw) => raw['txt'] != null)
-                .map(
-                  (raw) => DnssecTxtRecord(
-                    name: normalizeDnssecName(raw['name'] as String),
-                    ttl: raw['ttl'] as int,
-                    bytes: (raw['txt'] as List).cast<int>(),
-                  ),
-                )
-                .toList(),
           );
           close();
           result.complete(outcome);

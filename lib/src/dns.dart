@@ -219,12 +219,20 @@ class DnssecRecord {
   final int ttl;
   final String data;
 
-  const DnssecRecord({
+  /// The TXT character-strings concatenated, or null for other types.
+  final List<int>? txt;
+
+  DnssecRecord({
     required this.name,
     required this.type,
     required this.ttl,
     required this.data,
-  });
+    List<int>? txt,
+  }) : txt = txt == null ? null : List<int>.unmodifiable(txt) {
+    if (this.txt?.any((byte) => byte < 0 || byte > 255) ?? false) {
+      throw ArgumentError.value(txt, 'txt', 'TXT data must contain octets');
+    }
+  }
 }
 
 class DnssecTxtRecord {
