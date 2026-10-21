@@ -61,7 +61,9 @@ final class DnssecAliasLoopException extends DnssecException {
   });
 }
 
-/// A secure NODATA or NXDOMAIN proof showed the record does not exist.
+/// The name has no such record: a secure denial proof in a signed zone, or an
+/// answer without records from an insecure zone (unsigned, or not chained to
+/// a trust anchor by a supported algorithm).
 final class DnssecNoRecordException extends DnssecException {
   const DnssecNoRecordException(
     super.message, {
