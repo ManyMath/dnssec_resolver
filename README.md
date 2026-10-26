@@ -26,13 +26,13 @@ reads at most `maxResponseBytes` and returns the DNS message with its cache
 `lookup` returns a `DnssecResult` with its `status` (`secure`, `insecure`,
 `bogus`, `indeterminate`), records and CNAME aliases. `lookupTxt` and
 `DnssecResult.secureTxt()` return TXT records from a `secure` answer and throw
-a `DnssecException` otherwise. `lookup` and `lookupTxt` report a name with no
-such record as `DnssecNoRecordException`: a secure denial proof in a signed
-zone, or an answer without records from an insecure zone (unsigned, or not
-chained to a trust anchor by a supported algorithm). `startLookup` and
-`startTxtLookup` return a cancellable `DnssecOperation` whose `result` carries
-every failure, including an invalid name; an unsupported record type throws
-`ArgumentError`. Record types: A, CNAME, TXT and AAAA.
+a `DnssecException` otherwise. `lookup` and `lookupTxt` report a secure NODATA
+or NXDOMAIN proof as `DnssecNoRecordException`; an empty answer without such a
+proof is reported by its DNSSEC status, `insecure` for an unsigned zone.
+`startLookup` and `startTxtLookup` return a cancellable `DnssecOperation`
+whose `result` carries every failure, including an invalid name; an
+unsupported record type throws `ArgumentError`. Record types: A, CNAME, TXT
+and AAAA.
 
 ## Trust model
 
