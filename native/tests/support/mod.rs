@@ -289,6 +289,14 @@ pub fn fixtures() -> (String, BTreeMap<String, Message>) {
             ))),
         )]));
         put("unsigned.test.", RecordType::DS, vec![], no_ds);
+        // Denials from the unsigned zone carry no proof.
+        put(
+            "empty.unsigned.test.",
+            RecordType::TXT,
+            vec![],
+            vec![unsigned_soa()],
+        );
+        put("bare.unsigned.test.", RecordType::TXT, vec![], vec![]);
         put(
             "wild.example.test.",
             RecordType::TXT,
@@ -687,7 +695,25 @@ pub fn fixtures() -> (String, BTreeMap<String, Message>) {
             ResponseCode::NXDomain,
         ),
     );
+    messages.insert(
+        format!("missing.unsigned.test.:{}", u16::from(RecordType::TXT)),
+        response(
+            "missing.unsigned.test.",
+            RecordType::TXT,
+            vec![],
+            vec![unsigned_soa()],
+            ResponseCode::NXDomain,
+        ),
+    );
     (anchor, messages)
+}
+
+fn unsigned_soa() -> Record {
+    let apex = Name::from_ascii("unsigned.test.").unwrap();
+    rr(
+        "unsigned.test.",
+        RData::SOA(SOA::new(apex.clone(), apex, 1, 60, 60, 3600, 60)),
+    )
 }
 
 fn txt_data(parts: Vec<String>) -> TXT {

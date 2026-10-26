@@ -578,6 +578,72 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
+    fn denials_without_a_secure_proof_are_not_no_records() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        for (name, expected) in [
+            ("empty.unsigned.test.", "insecure"),
+            ("missing.unsigned.test.", "insecure"),
+            ("bare.unsigned.test.", "indeterminate"),
+        ] {
+            let event = fixtures.resolve(name, |q| fixtures.reply(q).to_vec().ok());
+            assert_eq!(status(&event), expected, "{name}");
+            assert_eq!(event["result"]["records"], json!([]));
+        }
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn secure_records_that_prove_nothing_make_a_denial_bogus() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        let txt = |q: &Message| q.queries[0].query_type == RecordType::TXT;
+        // A signed answer under an NXDOMAIN rcode, repeated in the authority.
+        let event = fixtures.resolve("alice.example.test.", |q| {
+            let mut message = fixtures.reply(q);
+            if txt(q) {
+                message.metadata.response_code = ResponseCode::NXDomain;
+                let answers = message.answers.clone();
+                message.insert_authorities(answers);
+            }
+            message.to_vec().ok()
+        });
+        assert_eq!(status(&event), "bogus");
+        // An unsigned zone's NODATA with another zone's signed RRset attached.
+        let foreign = fixtures.messages["alice.example.test.:16"].answers.clone();
+        let event = fixtures.resolve("bare.unsigned.test.", |q| {
+            let mut message = fixtures.reply(q);
+            if txt(q) {
+                message.insert_authorities(foreign.clone());
+            }
+            message.to_vec().ok()
+        });
+        assert_eq!(status(&event), "bogus");
+        assert_eq!(event["result"]["records"], json!([]));
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn secure_denials_report_no_records() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        for name in [
+            "empty.example.test.",
+            "nsec3.example.test.",
+            "missing.example.test.",
+            "missing3.example.test.",
+        ] {
+            let event = fixtures.resolve(name, |q| fixtures.reply(q).to_vec().ok());
+            assert_eq!(status(&event), "noRecords", "{name}");
+            assert_eq!(event["result"]["records"], json!([]));
+        }
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
     fn aliases_ending_in_authenticated_nodata_report_no_records() {
         let _serial = serial();
         let fixtures = Fixtures::new();

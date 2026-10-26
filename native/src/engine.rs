@@ -278,16 +278,9 @@ pub async fn resolve(
             .await;
         let response = match response {
             Some(Ok(response)) => response,
+            // The handle reports a denial it could not prove; a proven one is Ok.
             Some(Err(NetError::Dns(DnsError::Nsec { proof, .. }))) => {
-                return failure(
-                    if proof == Proof::Secure {
-                        "noRecords"
-                    } else {
-                        status(proof)
-                    },
-                    &owner,
-                    aliases,
-                );
+                return failure(status(proof), &owner, aliases);
             }
             Some(Err(NetError::Dns(DnsError::DnssecBogus))) => {
                 return failure("bogus", &owner, aliases);
@@ -338,10 +331,27 @@ pub async fn resolve(
             owner = target.0.clone();
             continue;
         }
+        // An empty answer is a proven denial only with a secure NSEC or NSEC3
+        // in the authority section; otherwise it is as weak as that section,
+        // and secure records that prove nothing make it bogus.
+        let denial = || {
+            let authorities = &response.authorities;
+            if authorities.iter().any(|r| {
+                r.proof == Proof::Secure
+                    && matches!(r.record_type(), RecordType::NSEC | RecordType::NSEC3)
+            }) {
+                return "noRecords";
+            }
+            match authorities.iter().map(|r| r.proof).min() {
+                None => "indeterminate",
+                Some(Proof::Secure) => "bogus",
+                Some(proof) => status(proof),
+            }
+        };
         if response.response_code != ResponseCode::NoError {
             return failure(
                 if response.response_code == ResponseCode::NXDomain {
-                    "noRecords"
+                    denial()
                 } else {
                     "queryFailed"
                 },
@@ -350,7 +360,7 @@ pub async fn resolve(
             );
         }
         if records.is_empty() {
-            return failure("noRecords", &owner, aliases);
+            return failure(denial(), &owner, aliases);
         }
         if let Some(rr) = records.iter().find(|r| r.proof != Proof::Secure) {
             return failure(status(rr.proof), &owner, aliases);

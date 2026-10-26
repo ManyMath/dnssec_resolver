@@ -210,6 +210,28 @@ void main() {
     expect(result.records, isEmpty);
   });
 
+  for (final (name, status) in [
+    ('empty.unsigned.test', DnssecStatus.insecure),
+    ('missing.unsigned.test', DnssecStatus.insecure),
+    ('bare.unsigned.test', DnssecStatus.indeterminate),
+  ]) {
+    test('an unproven denial for $name is not a missing record', () async {
+      final result = await resolver.lookup(name);
+      expect(result.status, status);
+      expect(result.records, isEmpty);
+      await expectLater(
+        resolver.lookupTxt(name),
+        throwsA(
+          isA<DnssecValidationException>().having(
+            (error) => error.status,
+            'status',
+            status,
+          ),
+        ),
+      );
+    });
+  }
+
   for (final name in ['alias-empty', 'alias-nodata']) {
     test('$name alias ending in authenticated NODATA has no records', () async {
       await expectLater(
