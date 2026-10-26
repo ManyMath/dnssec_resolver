@@ -578,6 +578,60 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
+    fn sha1_only_delegations_are_bogus() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        let event = fixtures.resolve("alice.sha1-ds.test.", |q| fixtures.reply(q).to_vec().ok());
+        assert_eq!(status(&event), "bogus");
+        assert_eq!(event["result"]["records"], json!([]));
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_stronger_ds_in_the_authority_section_does_not_rescue_sha1() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        let planted: Vec<_> = fixtures.messages["mixed-ds.test.:43"]
+            .answers
+            .iter()
+            .filter(|r| {
+                matches!(&r.data, RData::DNSSEC(DNSSECRData::DS(ds)) if u8::from(ds.digest_type()) == 2)
+            })
+            .map(|r| {
+                let mut r = r.clone();
+                r.name = Name::from_ascii("sha1-ds.test.").unwrap();
+                r
+            })
+            .collect();
+        assert_eq!(planted.len(), 1);
+        let event = fixtures.resolve("alice.sha1-ds.test.", |q| {
+            let mut message = fixtures.reply(q);
+            if q.queries[0].query_type == RecordType::DS
+                && q.queries[0].name.to_ascii() == "sha1-ds.test."
+            {
+                message.insert_authorities(planted.clone());
+            }
+            message.to_vec().ok()
+        });
+        assert_eq!(status(&event), "bogus");
+        assert_eq!(event["result"]["records"], json!([]));
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn mixed_digest_delegations_stay_secure() {
+        let _serial = serial();
+        let fixtures = Fixtures::new();
+        let event = fixtures.resolve("alice.mixed-ds.test.", |q| fixtures.reply(q).to_vec().ok());
+        assert_eq!(status(&event), "secure");
+        assert_eq!(event["result"]["records"].as_array().unwrap().len(), 1);
+        wait_for_workers();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
     fn denials_without_a_secure_proof_are_not_no_records() {
         let _serial = serial();
         let fixtures = Fixtures::new();

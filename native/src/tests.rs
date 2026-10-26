@@ -130,6 +130,85 @@ async fn transport_drops_sha1_signatures() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn transport_drops_sha1_digests() {
+    use hickory_net::proto::dnssec::rdata::{DNSSECRData, DS};
+    let (transport, mut receiver) = transport();
+    let ds = |name, digest_type, len| {
+        Record::from_rdata(
+            Name::from_ascii(name).unwrap(),
+            300,
+            RData::DNSSEC(DNSSECRData::DS(DS::new(
+                1,
+                Algorithm::ED25519,
+                digest_type,
+                vec![0; len],
+            ))),
+        )
+    };
+    let digests = |section: &[Record]| -> Vec<_> {
+        section
+            .iter()
+            .filter_map(|r| match &r.data {
+                RData::DNSSEC(DNSSECRData::DS(ds)) => Some((r.name.to_ascii(), ds.digest_type())),
+                _ => None,
+            })
+            .collect()
+    };
+    // A stronger digest in the authority section does not vouch for the
+    // answer's SHA-1 digest; an unsupported digest type is not stronger.
+    let authorities = || {
+        vec![
+            ds("mixed.test.", DigestType::SHA1, 20),
+            ds("mixed.test.", DigestType::SHA256, 32),
+            ds("legacy.test.", DigestType::SHA1, 20),
+            ds("legacy.test.", DigestType::SHA256, 32),
+            ds("gost.test.", DigestType::SHA1, 20),
+            ds("gost.test.", DigestType::Unknown(3), 32),
+        ]
+    };
+    let kept = [
+        ("mixed.test.".to_string(), DigestType::SHA1),
+        ("mixed.test.".to_string(), DigestType::SHA256),
+        ("legacy.test.".to_string(), DigestType::SHA1),
+        ("legacy.test.".to_string(), DigestType::SHA256),
+        ("gost.test.".to_string(), DigestType::Unknown(3)),
+    ];
+    let mixed = kept[..2].to_vec();
+    for (id, name, answers, expected) in [
+        (
+            1,
+            "mixed.test.",
+            vec![
+                ds("mixed.test.", DigestType::SHA1, 20),
+                ds("mixed.test.", DigestType::SHA256, 32),
+            ],
+            mixed.clone(),
+        ),
+        (
+            2,
+            "legacy.test.",
+            vec![ds("legacy.test.", DigestType::SHA1, 20)],
+            vec![],
+        ),
+    ] {
+        let message = support::response(
+            name,
+            RecordType::DS,
+            answers,
+            authorities(),
+            ResponseCode::NoError,
+        );
+        let mut stream = transport.send(request(id, name, RecordType::DS));
+        let (response, _) = tokio::join!(stream.next(), serve(&mut receiver, message));
+        let response = response.unwrap().unwrap();
+        assert_eq!(digests(&response.answers), expected);
+        assert_eq!(response.answers.len(), expected.len());
+        assert_eq!(digests(&response.authorities), kept);
+        assert_eq!(response.authorities.len(), kept.len());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn transport_coalesces_identical_questions() {
     let (transport, mut receiver) = transport();
     let message = support::response(

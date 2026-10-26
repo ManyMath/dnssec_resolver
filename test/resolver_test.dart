@@ -210,6 +210,18 @@ void main() {
     expect(result.records, isEmpty);
   });
 
+  test('SHA-1 only delegations are bogus', () async {
+    final result = await resolver.lookup('alice.sha1-ds.test');
+    expect(result.status, DnssecStatus.bogus);
+    expect(result.records, isEmpty);
+  });
+
+  test('mixed digest delegations stay secure', () async {
+    final result = await resolver.lookup('alice.mixed-ds.test');
+    expect(result.status, DnssecStatus.secure);
+    expect(result.secureTxt().single.text, contains('valid'));
+  });
+
   for (final (name, status) in [
     ('empty.unsigned.test', DnssecStatus.insecure),
     ('missing.unsigned.test', DnssecStatus.insecure),

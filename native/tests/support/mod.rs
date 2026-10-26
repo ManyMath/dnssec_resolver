@@ -640,6 +640,84 @@ pub fn fixtures() -> (String, BTreeMap<String, Message>) {
             legacy.signed(vec![txt("alice.legacy.test.")]),
             vec![],
         );
+        let sha1_ds = Zone::new("sha1-ds.test.", 15);
+        put(
+            "sha1-ds.test.",
+            RecordType::DS,
+            tld.signed(vec![rr(
+                "sha1-ds.test.",
+                RData::DNSSEC(DNSSECRData::DS(
+                    DS::from_key(
+                        &sha1_ds.key.to_public_key().unwrap(),
+                        &sha1_ds.name,
+                        DigestType::SHA1,
+                    )
+                    .unwrap(),
+                )),
+            )]),
+            vec![],
+        );
+        put("sha1-ds.test.", RecordType::DNSKEY, sha1_ds.keys(), vec![]);
+        put(
+            "sha1-ds.test.",
+            RecordType::NS,
+            sha1_ds.signed(vec![rr(
+                "sha1-ds.test.",
+                RData::NS(NS(sha1_ds.name.clone())),
+            )]),
+            vec![],
+        );
+        put(
+            "alice.sha1-ds.test.",
+            RecordType::TXT,
+            sha1_ds.signed(vec![txt("alice.sha1-ds.test.")]),
+            vec![],
+        );
+        // A digest transition: SHA-1 and SHA-256 DS records signed as one RRset.
+        let mixed_ds = Zone::new("mixed-ds.test.", 16);
+        let mixed_digest = |digest_type| {
+            rr(
+                "mixed-ds.test.",
+                RData::DNSSEC(DNSSECRData::DS(
+                    DS::from_key(
+                        &mixed_ds.key.to_public_key().unwrap(),
+                        &mixed_ds.name,
+                        digest_type,
+                    )
+                    .unwrap(),
+                )),
+            )
+        };
+        put(
+            "mixed-ds.test.",
+            RecordType::DS,
+            tld.signed(vec![
+                mixed_digest(DigestType::SHA1),
+                mixed_digest(DigestType::SHA256),
+            ]),
+            vec![],
+        );
+        put(
+            "mixed-ds.test.",
+            RecordType::DNSKEY,
+            mixed_ds.keys(),
+            vec![],
+        );
+        put(
+            "mixed-ds.test.",
+            RecordType::NS,
+            mixed_ds.signed(vec![rr(
+                "mixed-ds.test.",
+                RData::NS(NS(mixed_ds.name.clone())),
+            )]),
+            vec![],
+        );
+        put(
+            "alice.mixed-ds.test.",
+            RecordType::TXT,
+            mixed_ds.signed(vec![txt("alice.mixed-ds.test.")]),
+            vec![],
+        );
     }
     let mut nxdomain = zone.soa();
     nxdomain.extend(zone.signed(vec![rr(

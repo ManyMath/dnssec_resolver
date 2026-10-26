@@ -179,15 +179,33 @@ impl Transport {
         // Answers are scoped to the queried owner; aliases are followed by the engine.
         response.answers.retain(|r| r.name == question.name);
         response.additionals.clear();
-        // SHA-1 based signatures are not accepted.
-        let sha1 = |r: &hickory_net::proto::rr::Record| match &r.data {
-            RData::DNSSEC(DNSSECRData::RRSIG(sig)) => {
-                matches!(u8::from(sig.input().algorithm), 5 | 7)
-            }
-            _ => false,
+        // SHA-1 based signatures, and delegations secured only by SHA-1
+        // digests, are not accepted. The parent's RRSIG covers the whole DS
+        // RRset, so a SHA-1 digest is kept when a SHA-256 or SHA-384 digest for
+        // the same owner sits in the same section; another section cannot
+        // vouch for it.
+        let digest = |r: &hickory_net::proto::rr::Record| match &r.data {
+            RData::DNSSEC(DNSSECRData::DS(ds)) => Some(u8::from(ds.digest_type())),
+            _ => None,
         };
-        response.answers.retain(|r| !sha1(r));
-        response.authorities.retain(|r| !sha1(r));
+        let drop_sha1 = |section: &mut Vec<hickory_net::proto::rr::Record>| {
+            let stronger: HashSet<Name> = section
+                .iter()
+                .filter(|r| digest(r).is_some_and(|d| matches!(d, 2 | 4)))
+                .map(|r| r.name.clone())
+                .collect();
+            section.retain(|r| match &r.data {
+                RData::DNSSEC(DNSSECRData::RRSIG(sig)) => {
+                    !matches!(u8::from(sig.input().algorithm), 5 | 7)
+                }
+                RData::DNSSEC(DNSSECRData::DS(_)) => {
+                    digest(r) != Some(1) || stronger.contains(&r.name)
+                }
+                _ => true,
+            });
+        };
+        drop_sha1(&mut response.answers);
+        drop_sha1(&mut response.authorities);
         if question.query_type != RecordType::CNAME
             && response
                 .answers
