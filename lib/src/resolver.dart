@@ -189,6 +189,10 @@ class DnssecResolver {
     Timer? pollTimer;
     Timer? deadline;
     var done = false;
+    // Native polling backs off from 5 ms to 50 ms while idle and snaps back
+    // to 5 ms when an event is drained or an answer is delivered.
+    var pollMs = 5;
+    void Function() schedulePoll = () {};
 
     void cancelTransport(DnssecOperation<DnssecWireResponse>? exchange) {
       try {
@@ -245,6 +249,8 @@ class DnssecResolver {
         } finally {
           calloc.free(pointer);
         }
+        pollMs = 5;
+        schedulePoll();
       } catch (error, stack) {
         fail(_mapPortFailure(error, stack), stack);
       } finally {
@@ -252,11 +258,13 @@ class DnssecResolver {
       }
     }
 
-    void poll() {
+    bool poll() {
+      var drained = false;
       try {
         for (var i = 0; i < 16 && !done; i++) {
           final pointer = native.poll(handle);
           if (pointer == nullptr) break;
+          drained = true;
           late final Map<String, dynamic> event;
           try {
             event =
@@ -318,9 +326,20 @@ class DnssecResolver {
           stack,
         );
       }
+      return drained;
     }
 
-    pollTimer = Timer.periodic(const Duration(milliseconds: 5), (_) => poll());
+    schedulePoll = () {
+      if (done) return;
+      pollTimer?.cancel();
+      pollTimer = Timer(Duration(milliseconds: pollMs), () {
+        final drained = poll();
+        if (done) return;
+        pollMs = drained ? 5 : (pollMs * 2 > 50 ? 50 : pollMs * 2);
+        schedulePoll();
+      });
+    };
+    schedulePoll();
     deadline = Timer(
       timeout,
       () => fail(

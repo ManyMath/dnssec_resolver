@@ -64,12 +64,14 @@ class FixtureTransport implements DnssecWireTransport {
   final List<int> Function(List<int> query, List<int> reply)? mutate;
   final Duration age;
   final Object? failure;
+  final Duration? delay;
   int cancellations = 0;
   FixtureTransport(
     this.fixtures, {
     this.mutate,
     this.age = Duration.zero,
     this.failure,
+    this.delay,
   });
 
   @override
@@ -79,15 +81,16 @@ class FixtureTransport implements DnssecWireTransport {
   }) {
     queries.add(query);
     final reply = fixtures.reply(query);
+    Future<DnssecWireResponse> respond() => failure == null
+        ? Future.value(
+            DnssecWireResponse(
+              mutate == null ? reply : mutate!(query, reply),
+              age: age,
+            ),
+          )
+        : Future.error(failure!);
     return DnssecOperation(
-      failure == null
-          ? Future.value(
-              DnssecWireResponse(
-                mutate == null ? reply : mutate!(query, reply),
-                age: age,
-              ),
-            )
-          : Future.error(failure!),
+      delay == null ? respond() : Future.delayed(delay!, respond),
       () => cancellations++,
     );
   }

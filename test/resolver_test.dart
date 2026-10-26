@@ -18,6 +18,42 @@ void main() {
     );
   });
 
+  test('a slow transport is still observed', () async {
+    final slow = FixtureTransport(
+      fixtures,
+      delay: const Duration(milliseconds: 120),
+    );
+    final result = await DnssecResolver(
+      transport: slow,
+      trustAnchors: fixtures.anchor,
+    ).lookupTxt('alice.example.test');
+    expect(result.single.text, 'oa1:xmr recipient_address=valid;');
+    expect(slow.queries, isNotEmpty);
+  });
+
+  test('cancel stops further activity', () async {
+    final slow = FixtureTransport(
+      fixtures,
+      delay: const Duration(milliseconds: 600),
+    );
+    final operation = DnssecResolver(
+      transport: slow,
+      trustAnchors: fixtures.anchor,
+    ).startTxtLookup('alice.example.test');
+    final outcome = expectLater(
+      operation.result,
+      throwsA(isA<DnssecCancelledException>()),
+    );
+    while (slow.queries.isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    operation.cancel();
+    await outcome;
+    final before = slow.queries.length;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(slow.queries.length, before);
+  });
+
   test('validates TXT through root, parent DS, and zone DNSKEY', () async {
     final result = await resolver.lookupTxt('ALICE.EXAMPLE.TEST.');
     expect(result.single.text, 'oa1:xmr recipient_address=valid;');
